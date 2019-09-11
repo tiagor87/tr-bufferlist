@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageVersion>0.0.1</PackageVersion>
+    <Title>BufferList</Title>
+    <Authors>tiagor87@gmail.com</Authors>
+    <Description>A List that clears automatically when capacity achieved or timer elapsed.</Description>
+  </PropertyGroup>
+
+</Project>
