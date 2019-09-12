@@ -4,22 +4,28 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Timers;
 
-namespace BufferList.Core
+namespace BufferList
 {
     public delegate void EventHandler<in T>(IEnumerable<T> removedItems);
-    
+
     public sealed class BufferList<T> : IList<T>, IDisposable
     {
-        private static volatile object _sync = new object();
-        private bool _disposed;
         private readonly List<T> _list;
         private readonly Timer _timer;
+        private bool _disposed;
+        private volatile object _sync = new object();
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {
             _timer = new Timer(clearTtl.TotalMilliseconds);
             _timer.Elapsed += TimerOnElapsed;
             _list = new List<T>(capacity);
+        }
+
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         public int Count
@@ -32,7 +38,7 @@ namespace BufferList.Core
                 }
             }
         }
-        
+
         public T this[int index]
         {
             get
@@ -48,13 +54,11 @@ namespace BufferList.Core
                 lock (_sync)
                 {
                     _list[index] = value;
-                }   
+                }
             }
         }
 
         public bool IsReadOnly => false;
-
-        public event EventHandler<T> Cleared;
 
         public IEnumerator<T> GetEnumerator()
         {
@@ -74,10 +78,8 @@ namespace BufferList.Core
             RestartTimer();
             lock (_sync)
             {
-                if (_list.Count == _list.Capacity)
-                {
-                    Clear();
-                }
+                if (_list.Count == _list.Capacity) Clear();
+
                 _list.Add(item);
             }
         }
@@ -91,6 +93,7 @@ namespace BufferList.Core
                 removed = _list.ToList();
                 _list.Clear();
             }
+
             RaiseEvent(removed);
         }
 
@@ -146,34 +149,27 @@ namespace BufferList.Core
             }
         }
 
+        public event EventHandler<T> Cleared;
+
         ~BufferList()
         {
             Dispose(false);
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
         }
 
         private void Dispose(bool disposing)
         {
             if (_disposed) return;
 
-            if (disposing)
-            {
-                Clear();
-            }
+            if (disposing) Clear();
 
             _disposed = true;
         }
-        
+
         private void TimerOnElapsed(object sender, ElapsedEventArgs e)
         {
             Clear();
         }
-        
+
         private void RaiseEvent(IEnumerable<T> removed)
         {
             RestartTimer();
@@ -182,8 +178,11 @@ namespace BufferList.Core
 
         private void RestartTimer()
         {
-            _timer.Stop();
-            _timer.Start();
+            lock (_sync)
+            {
+                _timer.Stop();
+                _timer.Start();
+            }
         }
     }
 }
