@@ -11,9 +11,9 @@ namespace BufferList
     public sealed class BufferList<T> : IList<T>, IDisposable
     {
         private readonly List<T> _list;
+        private readonly object _sync = new object();
         private readonly Timer _timer;
         private bool _disposed;
-        private volatile object _sync = new object();
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {

@@ -6,6 +6,7 @@
     <Title>BufferList</Title>
     <Authors>tiagor87@gmail.com</Authors>
     <Description>A List that clears automatically when capacity achieved or timer elapsed.</Description>
+    <ProjectGuid>{FAD8657A-D916-4178-A50F-A5963F27A6CF}</ProjectGuid>
   </PropertyGroup>
 
 </Project>
