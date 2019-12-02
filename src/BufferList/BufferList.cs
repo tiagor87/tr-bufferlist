@@ -82,11 +82,11 @@ namespace BufferList
             {
                 if (_list.TryTake(out var item)) removed.Add(item);
             }
-
+            
             while (!_failedList.IsEmpty)
             {
                 if (_failedList.TryTake(out var item)) removed.Add(item);
-            } 
+            }
 
             RaiseEvent(removed);
         }
