@@ -1,25 +1,31 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Timers;
+using Timer = System.Timers.Timer;
 
 namespace BufferList
 {
     public delegate void EventHandler<in T>(IEnumerable<T> removedItems);
 
-    public sealed class BufferList<T> : IList<T>, IDisposable
+    public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
-        private readonly List<T> _list;
+        private readonly ConcurrentBag<T> _list;
+        private readonly ConcurrentBag<T> _failedList;
         private readonly object _sync = new object();
         private readonly Timer _timer;
         private bool _disposed;
+        private readonly int _capacity;
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {
             _timer = new Timer(clearTtl.TotalMilliseconds);
             _timer.Elapsed += TimerOnElapsed;
-            _list = new List<T>(capacity);
+            _list = new ConcurrentBag<T>();
+            _failedList = new ConcurrentBag<T>();
+            _capacity = capacity;
         }
 
         public void Dispose()
@@ -38,27 +44,14 @@ namespace BufferList
                 }
             }
         }
-
-        public T this[int index]
-        {
-            get
-            {
-                lock (_sync)
-                {
-                    return _list[index];
-                }
-            }
-            set
-            {
-                RestartTimer();
-                lock (_sync)
-                {
-                    _list[index] = value;
-                }
-            }
-        }
+        
+        public int Capacity => _capacity;
 
         public bool IsReadOnly => false;
+        
+        public bool IsFull => Count >= Capacity;
+
+        public IEnumerable<T> Failed => _failedList.ToList();
 
         public IEnumerator<T> GetEnumerator()
         {
@@ -76,80 +69,30 @@ namespace BufferList
         public void Add(T item)
         {
             RestartTimer();
-            lock (_sync)
-            {
-                if (_list.Count == _list.Capacity) Clear();
-
-                _list.Add(item);
-            }
+            _list.Add(item);
+            if (IsFull) Clear();
         }
 
         public void Clear()
         {
-            List<T> removed;
-            lock (_sync)
+            if (!_list.Any()) return;
+            
+            var removed = new List<T>();
+            while (!_list.IsEmpty && removed.Count < Capacity)
             {
-                if (!_list.Any()) return;
-                removed = _list.ToList();
-                _list.Clear();
+                if (_list.TryTake(out var item)) removed.Add(item);
             }
+
+            while (!_failedList.IsEmpty)
+            {
+                if (_failedList.TryTake(out var item)) removed.Add(item);
+            } 
 
             RaiseEvent(removed);
         }
 
-        public bool Contains(T item)
-        {
-            lock (_sync)
-            {
-                return _list.Contains(item);
-            }
-        }
-
-        public void CopyTo(T[] array, int arrayIndex)
-        {
-            lock (_sync)
-            {
-                _list.CopyTo(array, arrayIndex);
-            }
-        }
-
-        public bool Remove(T item)
-        {
-            RestartTimer();
-            lock (_sync)
-            {
-                var result = _list.Remove(item);
-                return result;
-            }
-        }
-
-        public int IndexOf(T item)
-        {
-            lock (_sync)
-            {
-                return _list.IndexOf(item);
-            }
-        }
-
-        public void Insert(int index, T item)
-        {
-            RestartTimer();
-            lock (_sync)
-            {
-                _list.Insert(index, item);
-            }
-        }
-
-        public void RemoveAt(int index)
-        {
-            RestartTimer();
-            lock (_sync)
-            {
-                _list.RemoveAt(index);
-            }
-        }
-
         public event EventHandler<T> Cleared;
+        public event EventHandler<T> Disposed;
 
         ~BufferList()
         {
@@ -160,7 +103,12 @@ namespace BufferList
         {
             if (_disposed) return;
 
-            if (disposing) Clear();
+            if (disposing)
+            {
+                Clear();
+                _timer.Dispose();
+                Disposed?.Invoke(Failed);
+            }
 
             _disposed = true;
         }
@@ -173,7 +121,23 @@ namespace BufferList
         private void RaiseEvent(IEnumerable<T> removed)
         {
             RestartTimer();
-            Cleared?.Invoke(removed);
+            var removedItems = removed.ToList();
+            try
+            {
+                Cleared?.Invoke(removedItems);
+            }
+            catch
+            {
+                AddRangeToFailed(removedItems);
+            }
+        }
+        
+        private void AddRangeToFailed(IEnumerable<T> items)
+        {
+            foreach (var item in items)
+            {
+                _failedList.Add(item);
+            }
         }
 
         private void RestartTimer()

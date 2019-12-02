@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using FluentAssertions;
@@ -13,9 +14,16 @@ namespace BufferList.UnitTests
         {
             var removedCount = 0;
 
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(1));
-            list.Cleared += removed => { removedCount = removed.Count(); };
+            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(5));
+            var autoResetEvent = new AutoResetEvent(false);
+            list.Cleared += removed =>
+            {
+                removedCount = removed.Count();
+                autoResetEvent.Set();
+            };
             for (var i = 0; i < 1001; i++) list.Add(i);
+            
+            autoResetEvent.WaitOne();
 
             removedCount.Should().Be(1000);
             list.Should().HaveCount(1);
@@ -30,21 +38,6 @@ namespace BufferList.UnitTests
             };
 
             list.Contains(1).Should().BeTrue();
-        }
-
-        [Fact]
-        public void GivenBufferListWhenCopyToShouldCopy()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-            var target = new int[3];
-
-            list.CopyTo(target, 0);
-            target.Should().HaveCount(3);
         }
 
         [Fact]
@@ -94,47 +87,6 @@ namespace BufferList.UnitTests
         }
 
         [Fact]
-        public void GivenBufferListWhenGetItemFromIndexShouldReturn()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-
-            list[1].Should().Be(2);
-        }
-
-        [Fact]
-        public void GivenBufferListWhenIndexOfCalledShouldReturnIndexOfItem()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-
-            list.IndexOf(2).Should().Be(1);
-        }
-
-        [Fact]
-        public void GivenBufferListWhenInsertShouldAddItem()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-
-            list.Insert(0, 0);
-
-            list[0].Should().Be(0);
-        }
-
-        [Fact]
         public void GivenBufferListWhenInstantiateShouldBeEmptyAndNotReadOnly()
         {
             var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10));
@@ -142,49 +94,6 @@ namespace BufferList.UnitTests
             list.Should().NotBeNull();
             list.Should().BeEmpty();
             list.IsReadOnly.Should().BeFalse();
-        }
-
-        [Fact]
-        public void GivenBufferListWhenRemoveFromIndexShouldRemoveItem()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-            list.RemoveAt(1);
-
-            list.Should().NotContain(2);
-        }
-
-        [Fact]
-        public void GivenBufferListWhenRemoveShouldRemoveItem()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-            list.Remove(1);
-
-            list.Should().NotContain(1);
-        }
-
-        [Fact]
-        public void GivenBufferListWhenSetItemFromIndexShouldUpdate()
-        {
-            var list = new BufferList<int>(1000, TimeSpan.FromSeconds(10))
-            {
-                1,
-                2,
-                3
-            };
-
-            list[1] = 10;
-
-            list[1].Should().Be(10);
         }
 
         [Fact]
@@ -204,6 +113,19 @@ namespace BufferList.UnitTests
 
             removedCount.Should().Be(999);
             list.Should().BeEmpty();
+        }
+
+        [Fact]
+        public void GivenBufferWhenThrowOnClearingShouldRequeue()
+        {
+            var list = new BufferList<int>(100, TimeSpan.FromSeconds(1));
+            list.Cleared += removed => throw new Exception();
+            list.Disposed += failed => failed.Should().HaveCount(1000);
+            for (var i = 0; i < 1000; i++) list.Add(i);
+            list.Capacity.Should().Be(100);
+            list.Failed.Should().NotBeEmpty();
+            list.Dispose();
+            
         }
     }
 }
