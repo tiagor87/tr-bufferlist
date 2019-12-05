@@ -12,20 +12,21 @@ namespace BufferList
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
-        private readonly ConcurrentBag<T> _list;
-        private readonly ConcurrentBag<T> _failedList;
+        private readonly ConcurrentBag<T> _bag;
+        private readonly ConcurrentBag<T> _failedBag;
         private readonly object _sync = new object();
         private readonly Timer _timer;
         private bool _disposed;
-        private readonly int _capacity;
+        private bool _isProcessing;
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {
             _timer = new Timer(clearTtl.TotalMilliseconds);
             _timer.Elapsed += TimerOnElapsed;
-            _list = new ConcurrentBag<T>();
-            _failedList = new ConcurrentBag<T>();
-            _capacity = capacity;
+            _bag = new ConcurrentBag<T>();
+            _failedBag = new ConcurrentBag<T>();
+            Capacity = capacity;
+            _isProcessing = false;
         }
 
         public void Dispose()
@@ -34,32 +35,17 @@ namespace BufferList
             GC.SuppressFinalize(this);
         }
 
-        public int Count
-        {
-            get
-            {
-                lock (_sync)
-                {
-                    return _list.Count;
-                }
-            }
-        }
-        
-        public int Capacity => _capacity;
+        public int Count => _bag.Count;
+
+        public int Capacity { get; }
 
         public bool IsReadOnly => false;
         
         public bool IsFull => Count >= Capacity;
 
-        public IEnumerable<T> Failed => _failedList.ToList();
+        public IEnumerable<T> Failed => _failedBag.ToList();
 
-        public IEnumerator<T> GetEnumerator()
-        {
-            lock (_sync)
-            {
-                return _list.ToList().GetEnumerator();
-            }
-        }
+        public IEnumerator<T> GetEnumerator() => _bag.ToList().GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator()
         {
@@ -69,26 +55,33 @@ namespace BufferList
         public void Add(T item)
         {
             RestartTimer();
-            _list.Add(item);
-            if (IsFull) Clear();
+            _bag.Add(item);
+            
+            if (!IsFull || _isProcessing) return;
+            
+            lock (_sync)
+            {
+                if (_isProcessing) return;
+                _isProcessing = true;
+            }
+            
+            Clear();
+            
+            _isProcessing = false;
         }
 
         public void Clear()
         {
-            if (!_list.Any()) return;
-            
-            var removed = new List<T>();
-            while (!_list.IsEmpty && removed.Count < Capacity)
+            if (!_bag.Any()) return;
+
+            while (!_bag.IsEmpty)
             {
-                if (_list.TryTake(out var item)) removed.Add(item);
-            }
-            
-            while (!_failedList.IsEmpty)
-            {
-                if (_failedList.TryTake(out var item)) removed.Add(item);
+                var removed = GetElementsFromBag(_bag);
+                RaiseEvent(removed);
             }
 
-            RaiseEvent(removed);
+            var failed = GetElementsFromBag(_failedBag);
+            RaiseEvent(failed);
         }
 
         public event EventHandler<T> Cleared;
@@ -106,7 +99,10 @@ namespace BufferList
             if (disposing)
             {
                 Clear();
-                _timer.Dispose();
+                lock (_sync)
+                {
+                    _timer?.Dispose();
+                }
                 Disposed?.Invoke(Failed);
             }
 
@@ -120,8 +116,11 @@ namespace BufferList
 
         private void RaiseEvent(IEnumerable<T> removed)
         {
-            RestartTimer();
             var removedItems = removed.ToList();
+            
+            if (!removedItems.Any()) return;
+            
+            RestartTimer();
             try
             {
                 Cleared?.Invoke(removedItems);
@@ -136,7 +135,7 @@ namespace BufferList
         {
             foreach (var item in items)
             {
-                _failedList.Add(item);
+                _failedBag.Add(item);
             }
         }
 
@@ -147,6 +146,16 @@ namespace BufferList
                 _timer.Stop();
                 _timer.Start();
             }
+        }
+        
+        private IEnumerable<T> GetElementsFromBag(ConcurrentBag<T> bag)
+        {
+            var list = new List<T>();
+            while (!bag.IsEmpty && list.Count < Capacity)
+            {
+                if (bag.TryTake(out var item)) list.Add(item);
+            }
+            return list;
         }
     }
 }

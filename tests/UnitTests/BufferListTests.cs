@@ -1,7 +1,8 @@
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
 
@@ -125,7 +126,53 @@ namespace BufferList.UnitTests
             list.Capacity.Should().Be(100);
             list.Failed.Should().NotBeEmpty();
             list.Dispose();
-            
+        }
+
+        [Fact]
+        public void GivenBufferWhenFailedHasAnyShouldDispatchClearForFailedMessages()
+        {
+            var list = new BufferList<int>(1, TimeSpan.FromSeconds(10));
+            var dispatched = 0;
+            list.Cleared += removed =>
+            {
+                ++dispatched;
+                throw new Exception();
+            };
+
+            list.Add(1);
+            dispatched.Should().Be(2);
+            list.Failed.Should().HaveCount(1);
+        }
+
+        [Fact]
+        public async Task GivenBufferShouldTryToCleanListUntilBagIsEmpty()
+        {
+            var readded = 0;
+            var maxSize = 0;
+            var list = new BufferList<int>(10, TimeSpan.FromSeconds(10));
+            list.Cleared += removed =>
+            {
+                ++readded;
+                if (readded >= 100) return;
+                maxSize = Math.Max(maxSize, removed.Count());
+
+                foreach (var remove in removed)
+                {
+                    list.Add(remove);
+                }
+            };
+
+            var tasks = new List<Task>();
+            for (var i = 0; i < 10000; i++)
+            {
+                tasks.Add(Task.Run(() => list.Add(i)));
+            }
+
+            await Task.WhenAll(tasks);
+            Thread.Sleep(100);
+            list.Count.Should().Be(0);
+            maxSize.Should().Be(10);
+            list.Dispose();
         }
     }
 }
