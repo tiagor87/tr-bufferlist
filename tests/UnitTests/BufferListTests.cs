@@ -145,15 +145,38 @@ namespace BufferList.UnitTests
         }
 
         [Fact]
+        public void GivenBufferShouldCleanAsync()
+        {
+            var count = 0;
+            var list = new BufferList<int>(100, TimeSpan.FromSeconds(1));
+            
+            var autoReset = new AutoResetEvent(false);
+            list.ClearedAsync += removed =>
+            {
+                count = removed.Count();
+                autoReset.Set();
+                return Task.CompletedTask;
+            };
+            
+            for (var i = 0; i < 100; i++)
+            {
+                list.Add(i);
+            }
+
+            autoReset.WaitOne(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            count.Should().Be(100);
+        }
+
+        [Fact]
         public async Task GivenBufferShouldTryToCleanListUntilBagIsEmpty()
         {
-            var readded = 0;
+            var read = 0;
             var maxSize = 0;
             var list = new BufferList<int>(10, TimeSpan.FromSeconds(10));
             list.Cleared += removed =>
             {
-                ++readded;
-                if (readded >= 100) return;
+                ++read;
+                if (read >= 100) return;
                 maxSize = Math.Max(maxSize, removed.Count());
 
                 foreach (var remove in removed)

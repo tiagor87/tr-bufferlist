@@ -3,12 +3,14 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Timers;
 using Timer = System.Timers.Timer;
 
 namespace BufferList
 {
     public delegate void EventHandler<in T>(IEnumerable<T> removedItems);
+    public delegate Task AsyncEventHandler<in T>(IEnumerable<T> removedItems);
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
@@ -85,6 +87,7 @@ namespace BufferList
         }
 
         public event EventHandler<T> Cleared;
+        public event AsyncEventHandler<T> ClearedAsync;
         public event EventHandler<T> Disposed;
 
         ~BufferList()
@@ -124,6 +127,7 @@ namespace BufferList
             try
             {
                 Cleared?.Invoke(removedItems);
+                ClearedAsync?.Invoke(removedItems).ConfigureAwait(false);
             }
             catch
             {
