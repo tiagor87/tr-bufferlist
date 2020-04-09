@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -172,29 +173,31 @@ namespace BufferList.UnitTests
         {
             var read = 0;
             var maxSize = 0;
-            var list = new BufferList<int>(10, TimeSpan.FromSeconds(10));
+            var minSize = int.MaxValue;
+            var list = new BufferList<int>(10, TimeSpan.FromDays(1));
+            var autoResetEvent = new AutoResetEvent(false);
+            var count = 0;
             list.Cleared += removed =>
             {
+                minSize = Math.Min(minSize, removed.Count);
+                maxSize = Math.Max(maxSize, removed.Count);
+                count += removed.Count;
                 ++read;
-                if (read >= 100) return;
-                maxSize = Math.Max(maxSize, removed.Count());
-
-                foreach (var remove in removed)
-                {
-                    list.Add(remove);
-                }
+                if (read == 100) autoResetEvent.Set();
             };
 
             var tasks = new List<Task>();
-            for (var i = 0; i < 10000; i++)
+            for (var i = 0; i < 1000; i++)
             {
                 tasks.Add(Task.Run(() => list.Add(i)));
             }
 
             await Task.WhenAll(tasks);
-            Thread.Sleep(100);
-            list.Count.Should().Be(0);
+            autoResetEvent.WaitOne();
             maxSize.Should().Be(10);
+            minSize.Should().Be(10);
+            count.Should().Be(1000);
+            list.Count.Should().Be(0);
             list.Dispose();
         }
     }

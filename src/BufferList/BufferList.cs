@@ -3,14 +3,15 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using Timer = System.Timers.Timer;
 
 namespace BufferList
 {
-    public delegate void EventHandler<in T>(IEnumerable<T> removedItems);
-    public delegate Task AsyncEventHandler<in T>(IEnumerable<T> removedItems);
+    public delegate void EventHandler<T>(ICollection<T> removedItems);
+    public delegate Task AsyncEventHandler<T>(ICollection<T> removedItems);
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
@@ -19,7 +20,7 @@ namespace BufferList
         private readonly object _sync = new object();
         private readonly Timer _timer;
         private bool _disposed;
-        private bool _isProcessing;
+        private bool _cleaningIsRunning;
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {
@@ -28,7 +29,7 @@ namespace BufferList
             _bag = new ConcurrentBag<T>();
             _failedBag = new ConcurrentBag<T>();
             Capacity = capacity;
-            _isProcessing = false;
+            _cleaningIsRunning = false;
         }
 
         public void Dispose()
@@ -45,7 +46,7 @@ namespace BufferList
         
         public bool IsFull => Count >= Capacity;
 
-        public IEnumerable<T> Failed => _failedBag.ToList();
+        public ICollection<T> Failed => _failedBag.ToList();
 
         public IEnumerator<T> GetEnumerator() => _bag.ToList().GetEnumerator();
 
@@ -56,34 +57,46 @@ namespace BufferList
 
         public void Add(T item)
         {
-            RestartTimer();
-            _bag.Add(item);
-            
-            if (!IsFull || _isProcessing) return;
-            
-            lock (_sync)
+            while (_cleaningIsRunning && _bag.Count >= Capacity)
             {
-                if (_isProcessing) return;
-                _isProcessing = true;
+                Task.Delay(TimeSpan.FromMilliseconds(10));
             }
+
+            _bag.Add(item);
+
+            if (_cleaningIsRunning) return;
+            if (IsFull) Clear();
             
-            Clear();
-            
-            _isProcessing = false;
+            Restart();
         }
 
         public void Clear()
         {
-            if (!_bag.Any()) return;
-
-            while (!_bag.IsEmpty)
+            lock (_sync)
             {
-                var removed = GetElementsFromBag(_bag);
-                RaiseEvent(removed);
+                if (_cleaningIsRunning) return;
+                _cleaningIsRunning = true;
             }
+            Stop();
+            try
+            {
+                if (!_bag.Any()) return;
 
-            var failed = GetElementsFromBag(_failedBag);
-            RaiseEvent(failed);
+                while (!_bag.IsEmpty)
+                {
+                    var removed = GetElementsFromBag(_bag);
+                    System.Diagnostics.Debug.WriteLine(removed.Count);
+                    RaiseEvent(removed);
+                }
+
+                var failed = GetElementsFromBag(_failedBag);
+                RaiseEvent(failed);
+            }
+            finally
+            {
+                Start();
+                _cleaningIsRunning = false;
+            }
         }
 
         public event EventHandler<T> Cleared;
@@ -117,13 +130,12 @@ namespace BufferList
             Clear();
         }
 
-        private void RaiseEvent(IEnumerable<T> removed)
+        private void RaiseEvent(ICollection<T> removed)
         {
             var removedItems = removed.ToList();
             
             if (!removedItems.Any()) return;
             
-            RestartTimer();
             try
             {
                 Cleared?.Invoke(removedItems);
@@ -143,16 +155,29 @@ namespace BufferList
             }
         }
 
-        private void RestartTimer()
+        private void Stop()
         {
             lock (_sync)
             {
                 _timer.Stop();
-                _timer.Start();
             }
         }
         
-        private IEnumerable<T> GetElementsFromBag(ConcurrentBag<T> bag)
+        private void Start()
+        {
+            lock (_sync)
+            {
+                _timer.Start();
+            }
+        }
+
+        public void Restart()
+        {
+            Stop();
+            Start();
+        }
+        
+        private ICollection<T> GetElementsFromBag(ConcurrentBag<T> bag)
         {
             var list = new List<T>();
             while (!bag.IsEmpty && list.Count < Capacity)
