@@ -18,7 +18,7 @@ namespace BufferList.Samples.Console
 
             _buffer.ClearedAsync += items =>
             {
-                Thread.Sleep(250);
+                Task.Delay(TimeSpan.FromMilliseconds(500));
                 return Task.CompletedTask;
             };
             
@@ -26,7 +26,7 @@ namespace BufferList.Samples.Console
             
             var cancellationSource = new CancellationTokenSource();
 
-            for (var i = 0; i < 10; i++)
+            for (var i = 0; i < 500; i++)
             {
                 tasks.Add(Task.Factory.StartNew(() =>
                 {
@@ -37,7 +37,7 @@ namespace BufferList.Samples.Console
                 }, cancellationSource.Token));
             }
 
-            Task.WaitAll(tasks.ToArray(), TimeSpan.FromMinutes(1));
+            Task.WaitAll(tasks.ToArray(), TimeSpan.FromMinutes(5));
             
             cancellationSource.Cancel();
             

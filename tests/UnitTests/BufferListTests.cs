@@ -168,7 +168,7 @@ namespace BufferList.UnitTests
         }
 
         [Fact]
-        public async Task GivenBufferShouldTryToCleanListUntilBagIsEmpty()
+        public void GivenBufferShouldTryToCleanListUntilBagIsEmpty()
         {
             var read = 0;
             var maxSize = 0;
