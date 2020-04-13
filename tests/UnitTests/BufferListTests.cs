@@ -106,7 +106,7 @@ namespace BufferList.UnitTests
             var list = new BufferList<int>(1000, TimeSpan.FromSeconds(1));
             list.Cleared += removed =>
             {
-                removedCount = removed.Count();
+                removedCount = removed.Count;
                 autoResetEvent.Set();
             };
             for (var i = 0; i < 999; i++) list.Add(i);
@@ -172,29 +172,22 @@ namespace BufferList.UnitTests
         {
             var read = 0;
             var maxSize = 0;
-            var list = new BufferList<int>(10, TimeSpan.FromSeconds(10));
+            var count = 0;
+            var list = new BufferList<int>(10, TimeSpan.FromSeconds(60));
             list.Cleared += removed =>
             {
+                count += removed.Count;
                 ++read;
                 if (read >= 100) return;
                 maxSize = Math.Max(maxSize, removed.Count());
-
-                foreach (var remove in removed)
-                {
-                    list.Add(remove);
-                }
             };
 
-            var tasks = new List<Task>();
-            for (var i = 0; i < 10000; i++)
+            for (var i = 0; i < 1000; i++)
             {
-                tasks.Add(Task.Run(() => list.Add(i)));
+                list.Add(i);
             }
-
-            await Task.WhenAll(tasks);
-            Thread.Sleep(100);
-            list.Count.Should().Be(0);
             maxSize.Should().Be(10);
+            count.Should().Be(1000);
             list.Dispose();
         }
     }

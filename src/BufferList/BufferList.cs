@@ -20,7 +20,7 @@ namespace BufferList
         private readonly object _sync = new object();
         private readonly Timer _timer;
         private bool _disposed;
-        private bool _isProcessing;
+        private bool _isCleanningRunning;
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {
@@ -29,7 +29,7 @@ namespace BufferList
             _bag = new ConcurrentBag<T>();
             _failedBag = new ConcurrentBag<T>();
             Capacity = capacity;
-            _isProcessing = false;
+            _isCleanningRunning = false;
         }
 
         public void Dispose()
@@ -57,14 +57,14 @@ namespace BufferList
 
         public void Add(T item)
         {
-            while (_isProcessing && _bag.Count >= Capacity * 2)
+            while (_isCleanningRunning && _bag.Count >= Capacity)
             {
-                Thread.Sleep(10);
+                Task.Delay(10);
             }
             
             _bag.Add(item);
 
-            if (_isProcessing) return;
+            if (_isCleanningRunning) return;
             if (!IsFull)
             {
                 RestartTimer();
@@ -72,16 +72,17 @@ namespace BufferList
             }
             
             Clear().ConfigureAwait(false);
+            
         }
 
         public async Task Clear()
         {
-            if (!_bag.Any() || _isProcessing) return;
+            if (!_bag.Any() || _isCleanningRunning) return;
 
             lock (_sync)
             {
-                if (_isProcessing) return;
-                _isProcessing = true;
+                if (_isCleanningRunning) return;
+                _isCleanningRunning = true;
             }
 
             StopTimer();
@@ -102,7 +103,7 @@ namespace BufferList
             }
             finally
             {
-                _isProcessing = false;
+                _isCleanningRunning = false;
                 StartTimer();
             }
         }
@@ -168,11 +169,8 @@ namespace BufferList
 
         private void RestartTimer()
         {
-            lock (_sync)
-            {
-                _timer.Stop();
-                _timer.Start();
-            }
+            StopTimer();
+            StartTimer();
         }
 
         private void StartTimer()
