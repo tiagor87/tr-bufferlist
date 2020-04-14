@@ -206,7 +206,7 @@ namespace TRBufferList.Core.Tests
                 Task.Factory.StartNew(() => list.Add(11)));
             task.ExecutionTimeOf(x => x.Wait())
                 .Should()
-                .BeCloseTo(waitTime, TimeSpan.FromMilliseconds(200));
+                .BeGreaterOrEqualTo(waitTime - TimeSpan.FromMilliseconds(200));
         }
     }
 }
