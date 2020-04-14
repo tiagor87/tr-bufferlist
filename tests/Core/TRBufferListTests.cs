@@ -123,7 +123,7 @@ namespace TRBufferList.Core.Tests
             list.Disposed += failed => failed.Should().HaveCount(1000);
             for (var i = 0; i < 1000; i++) list.Add(i);
             list.Capacity.Should().Be(100);
-            list.Failed.Should().NotBeEmpty();
+            list.GetFailed().Should().NotBeEmpty();
             list.Dispose();
         }
 
@@ -140,7 +140,7 @@ namespace TRBufferList.Core.Tests
 
             list.Add(1);
             dispatched.Should().Be(2);
-            list.Failed.Should().HaveCount(1);
+            list.GetFailed().Should().HaveCount(1);
         }
 
         [Fact]

@@ -47,7 +47,7 @@ namespace TRBufferList.Core
         
         public bool IsFull => Count >= Capacity;
 
-        public IReadOnlyList<T> Failed => _failedBag.ToList();
+        public IReadOnlyList<T> GetFailed() => _failedBag.ToList();
 
         public IEnumerator<T> GetEnumerator() => _bag.ToList().GetEnumerator();
 
@@ -135,7 +135,7 @@ namespace TRBufferList.Core
             {
                 Clear().ConfigureAwait(false);
                 _timer.Dispose();
-                Disposed?.Invoke(Failed);
+                Disposed?.Invoke(GetFailed().ToList());
             }
 
             _disposed = true;
