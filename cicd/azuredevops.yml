@@ -1,4 +1,4 @@
-﻿name: $(Version_Major).$(Version_Minor)$(rev:.r)
+name: $(Version_Major).$(Version_Minor)$(rev:.r)
 
 variables:
   Sonar_ProjectKey: 'tiagor87_tr-bufferlist'
