@@ -76,7 +76,7 @@ namespace BufferList
 
         public async Task Clear()
         {
-            if (!_bag.Any() || _isCleanningRunning) return;
+            if ((_bag.IsEmpty && _failedBag.IsEmpty) || _isCleanningRunning) return;
 
             lock (_sync)
             {
@@ -86,19 +86,24 @@ namespace BufferList
 
             StopTimer();
 
+            var tasksCount = (int) Math.Ceiling((double) (_bag.Count + _failedBag.Count) / Capacity);
+
             List<T> removed = null;
             List<T> failed = null;
+            var cleanTasks = new List<Task>(tasksCount);
             try
             {
-                var cleanTasks = new List<Task>();
                 while (!_bag.IsEmpty)
                 {
                     removed = GetElementsFromBag(_bag);
                     cleanTasks.Add(RaiseEventAsync(removed));
                 }
 
-                failed = GetElementsFromBag(_failedBag);
-                cleanTasks.Add(RaiseEventAsync(failed));
+                if (!_failedBag.IsEmpty)
+                {
+                    failed = GetElementsFromBag(_failedBag);
+                    cleanTasks.Add(RaiseEventAsync(failed));
+                }
 
                 await Task.WhenAll(cleanTasks);
             }
@@ -106,6 +111,7 @@ namespace BufferList
             {
                 removed?.Clear();
                 failed?.Clear();
+                cleanTasks.Clear();
                 StartTimer();
                 _isCleanningRunning = false;
                 _autoResetEvent.Set();

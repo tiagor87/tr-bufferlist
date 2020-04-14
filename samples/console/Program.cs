@@ -16,17 +16,16 @@ namespace BufferList.Samples.Console
         {
             _buffer = new BufferList<Event>(5000, TimeSpan.FromSeconds(10));
 
-            _buffer.ClearedAsync += items =>
+            _buffer.ClearedAsync += async items =>
             {
-                Task.Delay(TimeSpan.FromMilliseconds(500));
-                return Task.CompletedTask;
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
             };
             
             var tasks = new List<Task>();
             
             var cancellationSource = new CancellationTokenSource();
 
-            for (var i = 0; i < 500; i++)
+            for (var i = 0; i < 250; i++)
             {
                 tasks.Add(Task.Factory.StartNew(() =>
                 {
@@ -37,11 +36,11 @@ namespace BufferList.Samples.Console
                 }, cancellationSource.Token));
             }
 
-            Task.WaitAll(tasks.ToArray(), TimeSpan.FromMinutes(5));
+            Task.WaitAll(tasks.ToArray(), TimeSpan.FromMinutes(1));
             
             cancellationSource.Cancel();
             
-            Thread.Sleep(1000);
+            Task.Delay(1000).Wait();
             
             tasks.Clear();
             
