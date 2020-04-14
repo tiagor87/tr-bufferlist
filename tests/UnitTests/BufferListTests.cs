@@ -173,7 +173,7 @@ namespace BufferList.UnitTests
             var read = 0;
             var maxSize = 0;
             var count = 0;
-            var list = new BufferList<int>(10, TimeSpan.FromSeconds(60));
+            var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan);
             list.Cleared += removed =>
             {
                 count += removed.Count;
@@ -189,6 +189,25 @@ namespace BufferList.UnitTests
             maxSize.Should().Be(10);
             count.Should().Be(1000);
             list.Dispose();
+        }
+
+        [Fact]
+        public void GivenBufferShouldWaitToAddWhenFull()
+        {
+            var waitTime = TimeSpan.FromSeconds(1);
+            const int capacity = 10;
+            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan);
+            for (var i = 1; i < capacity; i++)
+            {
+                list.Add(i);
+            }
+
+            list.Cleared += items => Task.Delay(waitTime).Wait();
+            var task = Task.WhenAny(Task.Factory.StartNew(() => list.Add(10)),
+                Task.Factory.StartNew(() => list.Add(11)));
+            task.ExecutionTimeOf(x => x.Wait())
+                .Should()
+                .BeCloseTo(waitTime, TimeSpan.FromMilliseconds(200));
         }
     }
 }

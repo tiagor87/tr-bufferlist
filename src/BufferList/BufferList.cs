@@ -65,15 +65,13 @@ namespace BufferList
             
             _bag.Add(item);
 
-            if (_isCleanningRunning) return;
             if (!IsFull)
             {
                 RestartTimer();
                 return;
             }
             
-            Clear().GetAwaiter().GetResult();
-            
+            Clear().ConfigureAwait(false);
         }
 
         public async Task Clear()
@@ -129,7 +127,7 @@ namespace BufferList
 
             if (disposing)
             {
-                Clear().GetAwaiter().GetResult();
+                Clear().ConfigureAwait(false);
                 _timer.Dispose();
                 Disposed?.Invoke(Failed);
             }
@@ -139,7 +137,7 @@ namespace BufferList
 
         private void TimerOnElapsed(object sender)
         {
-            Clear().GetAwaiter().GetResult();
+            Clear().ConfigureAwait(false);
         }
 
         private async Task RaiseEventAsync(IReadOnlyList<T> removed)
@@ -162,7 +160,7 @@ namespace BufferList
             }
         }
         
-        private void AddRangeToFailed(IEnumerable<T> items)
+        private void AddRangeToFailed(IReadOnlyList<T> items)
         {
             foreach (var item in items)
             {
