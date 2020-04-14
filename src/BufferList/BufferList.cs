@@ -3,32 +3,34 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Timers;
-using Timer = System.Timers.Timer;
 
 namespace BufferList
 {
-    public delegate void EventHandler<in T>(IEnumerable<T> removedItems);
-    public delegate Task AsyncEventHandler<in T>(IEnumerable<T> removedItems);
+    public delegate void EventHandler<in T>(IReadOnlyList<T> removedItems);
+    public delegate Task AsyncEventHandler<in T>(IReadOnlyList<T> removedItems);
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
+        private readonly TimeSpan _clearTtl;
         private readonly ConcurrentBag<T> _bag;
         private readonly ConcurrentBag<T> _failedBag;
         private readonly object _sync = new object();
         private readonly Timer _timer;
+        private readonly AutoResetEvent _autoResetEvent;
         private bool _disposed;
-        private bool _isProcessing;
+        private bool _isCleanningRunning;
 
         public BufferList(int capacity, TimeSpan clearTtl)
         {
-            _timer = new Timer(clearTtl.TotalMilliseconds);
-            _timer.Elapsed += TimerOnElapsed;
+            _autoResetEvent = new AutoResetEvent(false);
+            _clearTtl = clearTtl;
+            _timer = new Timer(TimerOnElapsed, null, clearTtl, Timeout.InfiniteTimeSpan);
             _bag = new ConcurrentBag<T>();
             _failedBag = new ConcurrentBag<T>();
             Capacity = capacity;
-            _isProcessing = false;
+            _isCleanningRunning = false;
         }
 
         public void Dispose()
@@ -45,7 +47,7 @@ namespace BufferList
         
         public bool IsFull => Count >= Capacity;
 
-        public IEnumerable<T> Failed => _failedBag.ToList();
+        public IReadOnlyList<T> Failed => _failedBag.ToList();
 
         public IEnumerator<T> GetEnumerator() => _bag.ToList().GetEnumerator();
 
@@ -56,34 +58,64 @@ namespace BufferList
 
         public void Add(T item)
         {
-            RestartTimer();
-            _bag.Add(item);
-            
-            if (!IsFull || _isProcessing) return;
-            
-            lock (_sync)
+            if (_isCleanningRunning || _bag.Count >= Capacity)
             {
-                if (_isProcessing) return;
-                _isProcessing = true;
+                _autoResetEvent.WaitOne();
             }
             
-            Clear();
+            _bag.Add(item);
+
+            if (!IsFull)
+            {
+                RestartTimer();
+                return;
+            }
             
-            _isProcessing = false;
+            Clear().ConfigureAwait(false);
         }
 
-        public void Clear()
+        public async Task Clear()
         {
-            if (!_bag.Any()) return;
+            if ((_bag.IsEmpty && _failedBag.IsEmpty) || _isCleanningRunning) return;
 
-            while (!_bag.IsEmpty)
+            lock (_sync)
             {
-                var removed = GetElementsFromBag(_bag);
-                RaiseEvent(removed);
+                if (_isCleanningRunning) return;
+                _isCleanningRunning = true;
             }
 
-            var failed = GetElementsFromBag(_failedBag);
-            RaiseEvent(failed);
+            StopTimer();
+
+            var tasksCount = (int) Math.Ceiling((double) (_bag.Count + _failedBag.Count) / Capacity);
+
+            List<T> removed = null;
+            List<T> failed = null;
+            var cleanTasks = new List<Task>(tasksCount);
+            try
+            {
+                while (!_bag.IsEmpty)
+                {
+                    removed = GetElementsFromBag(_bag);
+                    cleanTasks.Add(RaiseEventAsync(removed));
+                }
+
+                if (!_failedBag.IsEmpty)
+                {
+                    failed = GetElementsFromBag(_failedBag);
+                    cleanTasks.Add(RaiseEventAsync(failed));
+                }
+
+                await Task.WhenAll(cleanTasks);
+            }
+            finally
+            {
+                removed?.Clear();
+                failed?.Clear();
+                cleanTasks.Clear();
+                StartTimer();
+                _isCleanningRunning = false;
+                _autoResetEvent.Set();
+            }
         }
 
         public event EventHandler<T> Cleared;
@@ -101,41 +133,40 @@ namespace BufferList
 
             if (disposing)
             {
-                Clear();
-                lock (_sync)
-                {
-                    _timer?.Dispose();
-                }
+                Clear().ConfigureAwait(false);
+                _timer.Dispose();
                 Disposed?.Invoke(Failed);
             }
 
             _disposed = true;
         }
 
-        private void TimerOnElapsed(object sender, ElapsedEventArgs e)
+        private void TimerOnElapsed(object sender)
         {
-            Clear();
+            Clear().ConfigureAwait(false);
         }
 
-        private void RaiseEvent(IEnumerable<T> removed)
+        private async Task RaiseEventAsync(IReadOnlyList<T> removed)
         {
-            var removedItems = removed.ToList();
-            
-            if (!removedItems.Any()) return;
-            
-            RestartTimer();
+            if (!removed.Any()) return;
+
             try
             {
-                Cleared?.Invoke(removedItems);
-                ClearedAsync?.Invoke(removedItems).ConfigureAwait(false);
+                if (ClearedAsync != null)
+                {
+                    await ClearedAsync(removed);
+                    return;
+                }
+
+                Cleared?.Invoke(removed);
             }
             catch
             {
-                AddRangeToFailed(removedItems);
+                AddRangeToFailed(removed);
             }
         }
         
-        private void AddRangeToFailed(IEnumerable<T> items)
+        private void AddRangeToFailed(IReadOnlyList<T> items)
         {
             foreach (var item in items)
             {
@@ -145,14 +176,21 @@ namespace BufferList
 
         private void RestartTimer()
         {
-            lock (_sync)
-            {
-                _timer.Stop();
-                _timer.Start();
-            }
+            StopTimer();
+            StartTimer();
+        }
+
+        private void StartTimer()
+        {
+            _timer.Change(_clearTtl, Timeout.InfiniteTimeSpan);
         }
         
-        private IEnumerable<T> GetElementsFromBag(ConcurrentBag<T> bag)
+        private void StopTimer()
+        {
+            _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        }
+        
+        private List<T> GetElementsFromBag(ConcurrentBag<T> bag)
         {
             var list = new List<T>();
             while (!bag.IsEmpty && list.Count < Capacity)

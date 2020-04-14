@@ -106,7 +106,7 @@ namespace BufferList.UnitTests
             var list = new BufferList<int>(1000, TimeSpan.FromSeconds(1));
             list.Cleared += removed =>
             {
-                removedCount = removed.Count();
+                removedCount = removed.Count;
                 autoResetEvent.Set();
             };
             for (var i = 0; i < 999; i++) list.Add(i);
@@ -168,34 +168,46 @@ namespace BufferList.UnitTests
         }
 
         [Fact]
-        public async Task GivenBufferShouldTryToCleanListUntilBagIsEmpty()
+        public void GivenBufferShouldTryToCleanListUntilBagIsEmpty()
         {
             var read = 0;
             var maxSize = 0;
-            var list = new BufferList<int>(10, TimeSpan.FromSeconds(10));
+            var count = 0;
+            var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan);
             list.Cleared += removed =>
             {
+                count += removed.Count;
                 ++read;
                 if (read >= 100) return;
                 maxSize = Math.Max(maxSize, removed.Count());
-
-                foreach (var remove in removed)
-                {
-                    list.Add(remove);
-                }
             };
 
-            var tasks = new List<Task>();
-            for (var i = 0; i < 10000; i++)
+            for (var i = 0; i < 1000; i++)
             {
-                tasks.Add(Task.Run(() => list.Add(i)));
+                list.Add(i);
+            }
+            maxSize.Should().Be(10);
+            count.Should().Be(1000);
+            list.Dispose();
+        }
+
+        [Fact]
+        public void GivenBufferShouldWaitToAddWhenFull()
+        {
+            var waitTime = TimeSpan.FromSeconds(1);
+            const int capacity = 10;
+            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan);
+            for (var i = 1; i < capacity; i++)
+            {
+                list.Add(i);
             }
 
-            await Task.WhenAll(tasks);
-            Thread.Sleep(100);
-            list.Count.Should().Be(0);
-            maxSize.Should().Be(10);
-            list.Dispose();
+            list.Cleared += items => Task.Delay(waitTime).Wait();
+            var task = Task.WhenAny(Task.Factory.StartNew(() => list.Add(10)),
+                Task.Factory.StartNew(() => list.Add(11)));
+            task.ExecutionTimeOf(x => x.Wait())
+                .Should()
+                .BeCloseTo(waitTime, TimeSpan.FromMilliseconds(200));
         }
     }
 }
