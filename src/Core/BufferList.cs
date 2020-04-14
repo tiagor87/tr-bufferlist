@@ -6,7 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace BufferList
+namespace TRBufferList.Core
 {
     public delegate void EventHandler<in T>(IReadOnlyList<T> removedItems);
     public delegate Task AsyncEventHandler<in T>(IReadOnlyList<T> removedItems);

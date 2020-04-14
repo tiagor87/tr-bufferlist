@@ -1,12 +1,11 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Xunit;
 
-namespace BufferList.UnitTests
+namespace TRBufferList.Core.Tests
 {
     public class BufferListTests
     {
