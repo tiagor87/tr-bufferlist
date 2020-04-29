@@ -39,13 +39,13 @@ namespace TRBufferList.Core
             GC.SuppressFinalize(this);
         }
 
-        public int Count => _bag.Count;
+        public int Count => _bag.Count + _failedBag.Count;
 
         public int Capacity { get; }
 
         public bool IsReadOnly => false;
         
-        public bool IsFull => Count >= Capacity;
+        public bool IsFull => _bag.Count >= Capacity;
 
         public IReadOnlyList<T> GetFailed() => _failedBag.ToList();
 

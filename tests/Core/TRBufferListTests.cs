@@ -208,5 +208,19 @@ namespace TRBufferList.Core.Tests
                 .Should()
                 .BeGreaterOrEqualTo(waitTime - TimeSpan.FromMilliseconds(200));
         }
+
+        [Fact]
+        public void GivenBufferShouldCountFailedList()
+        {
+            var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan)
+            {
+                1
+            };
+            list.Cleared += items => throw new Exception();
+            
+            list.Clear();
+            
+            list.Count.Should().Be(1);
+        } 
     }
 }
