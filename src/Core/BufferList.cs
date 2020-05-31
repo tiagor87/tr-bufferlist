@@ -86,32 +86,24 @@ namespace TRBufferList.Core
 
             StopTimer();
 
-            var tasksCount = (int) Math.Ceiling((double) (_bag.Count + _failedBag.Count) / Capacity);
-
             List<T> removed = null;
-            List<T> failed = null;
-            var cleanTasks = new List<Task>(tasksCount);
             try
             {
                 while (!_bag.IsEmpty)
                 {
                     removed = GetElementsFromBag(_bag);
-                    cleanTasks.Add(RaiseEventAsync(removed));
+                    await RaiseEventAsync(removed);
                 }
 
                 if (!_failedBag.IsEmpty)
                 {
-                    failed = GetElementsFromBag(_failedBag);
-                    cleanTasks.Add(RaiseEventAsync(failed));
+                    removed = GetElementsFromBag(_failedBag);
+                    await RaiseEventAsync(removed);
                 }
-
-                await Task.WhenAll(cleanTasks);
             }
             finally
             {
                 removed?.Clear();
-                failed?.Clear();
-                cleanTasks.Clear();
                 StartTimer();
                 _isCleanningRunning = false;
                 _autoResetEvent.Set();
@@ -166,7 +158,7 @@ namespace TRBufferList.Core
             }
         }
         
-        private void AddRangeToFailed(IReadOnlyList<T> items)
+        private void AddRangeToFailed(IEnumerable<T> items)
         {
             foreach (var item in items)
             {

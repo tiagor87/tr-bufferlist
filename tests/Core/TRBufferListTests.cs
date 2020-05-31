@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,12 +22,36 @@ namespace TRBufferList.Core.Tests
                 removedCount = removed.Count();
                 autoResetEvent.Set();
             };
-            for (var i = 0; i < 1001; i++) list.Add(i);
+            for (var i = 0; i <= 1000; i++) list.Add(i);
             
             autoResetEvent.WaitOne();
 
             removedCount.Should().Be(1000);
             list.Should().HaveCount(1);
+        }
+        
+        [Fact]
+        public async Task GivenBufferListWhenClearShouldDispatchAListCopy()
+        {
+            IReadOnlyList<int> removedList = null;
+
+            var list = new BufferList<int>(1000, Timeout.InfiniteTimeSpan);
+            var autoResetEvent = new AutoResetEvent(false);
+            list.Cleared += removed =>
+            {
+                removedList = removed;
+                autoResetEvent.Set();
+            };
+            for (var i = 0; i <= 1000; i++) list.Add(i);
+            
+            autoResetEvent.WaitOne();
+            
+            GC.Collect(0);
+            GC.Collect(1);
+            GC.Collect(2);
+            await Task.Delay(TimeSpan.FromSeconds(5));
+
+            removedList.Should().NotBeNull();
         }
 
         [Fact]
@@ -221,6 +246,6 @@ namespace TRBufferList.Core.Tests
             list.Clear();
             
             list.Count.Should().Be(1);
-        } 
+        }
     }
 }
