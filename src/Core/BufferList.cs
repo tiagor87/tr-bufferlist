@@ -4,12 +4,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace TRBufferList.Core
 {
     public delegate void EventHandler<in T>(IReadOnlyList<T> removedItems);
-    public delegate Task AsyncEventHandler<in T>(IReadOnlyList<T> removedItems);
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
@@ -22,7 +20,13 @@ namespace TRBufferList.Core
         private bool _disposed;
         private bool _isCleanningRunning;
 
-        public BufferList(int capacity, TimeSpan clearTtl)
+        /// <summary>
+        /// Initialize a new instance of BufferList.
+        /// </summary>
+        /// <param name="capacity">Limit of items.</param>
+        /// <param name="clearTtl">Time to clean list when idle.</param>
+        /// <param name="blockCapacity">Limit to block new items.</param>
+        public BufferList(int capacity, TimeSpan clearTtl, int? blockCapacity = null)
         {
             _autoResetEvent = new AutoResetEvent(false);
             _clearTtl = clearTtl;
@@ -30,6 +34,7 @@ namespace TRBufferList.Core
             _bag = new ConcurrentBag<T>();
             _failedBag = new ConcurrentBag<T>();
             Capacity = capacity;
+            BlockCapacity = blockCapacity ?? capacity * 2;
             _isCleanningRunning = false;
         }
 
@@ -39,14 +44,32 @@ namespace TRBufferList.Core
             GC.SuppressFinalize(this);
         }
 
+        /// <summary>
+        /// Get the quantity of items in list.
+        /// </summary>
         public int Count => _bag.Count + _failedBag.Count;
 
+        /// <summary>
+        /// Get the limit of items to start cleanning.
+        /// </summary>
         public int Capacity { get; }
+        
+        /// <summary>
+        /// Get the limit to block add new items.
+        /// </summary>
+        public int BlockCapacity { get; }
 
         public bool IsReadOnly => false;
         
+        /// <summary>
+        /// Get the status if buffer is full.
+        /// </summary>
         public bool IsFull => _bag.Count >= Capacity;
 
+        /// <summary>
+        /// Get items that failed to publish.
+        /// </summary>
+        /// <returns>List of items.</returns>
         public IReadOnlyList<T> GetFailed() => _failedBag.ToList();
 
         public IEnumerator<T> GetEnumerator() => _bag.ToList().GetEnumerator();
@@ -56,9 +79,16 @@ namespace TRBufferList.Core
             return GetEnumerator();
         }
 
+        /// <summary>
+        /// Add new item to list.
+        ///
+        /// When capacity is achievied, <see cref="Clear"/> is executed.
+        /// When block capacity is achievied, Add will wait to finish execution.
+        /// </summary>
+        /// <param name="item">The item to add.</param>
         public void Add(T item)
         {
-            if (_isCleanningRunning || _bag.Count >= Capacity)
+            if (_isCleanningRunning || _bag.Count >= BlockCapacity)
             {
                 _autoResetEvent.WaitOne();
             }
@@ -71,12 +101,15 @@ namespace TRBufferList.Core
                 return;
             }
             
-            Clear().ConfigureAwait(false);
+            Clear();
         }
 
-        public async Task Clear()
+        /// <summary>
+        /// Clear the list.
+        /// </summary>
+        public void Clear()
         {
-            if ((_bag.IsEmpty && _failedBag.IsEmpty) || _isCleanningRunning) return;
+            if (_bag.IsEmpty && _failedBag.IsEmpty || _isCleanningRunning) return;
 
             lock (_sync)
             {
@@ -92,14 +125,13 @@ namespace TRBufferList.Core
                 while (!_bag.IsEmpty)
                 {
                     removed = GetElementsFromBag(_bag);
-                    await RaiseEventAsync(removed);
+                    DispatchEvents(removed);
                 }
 
-                if (!_failedBag.IsEmpty)
-                {
-                    removed = GetElementsFromBag(_failedBag);
-                    await RaiseEventAsync(removed);
-                }
+                if (_failedBag.IsEmpty) return;
+                
+                removed = GetElementsFromBag(_failedBag);
+                DispatchEvents(removed);
             }
             finally
             {
@@ -110,8 +142,14 @@ namespace TRBufferList.Core
             }
         }
 
+        /// <summary>
+        /// Event is called everytime the list is cleared.
+        /// </summary>
         public event EventHandler<T> Cleared;
-        public event AsyncEventHandler<T> ClearedAsync;
+        
+        /// <summary>
+        /// Event is called just before the list is disposed.
+        /// </summary>
         public event EventHandler<T> Disposed;
 
         ~BufferList()
@@ -125,7 +163,7 @@ namespace TRBufferList.Core
 
             if (disposing)
             {
-                Clear().ConfigureAwait(false);
+                Clear();
                 _timer.Dispose();
                 Disposed?.Invoke(GetFailed().ToList());
             }
@@ -135,21 +173,15 @@ namespace TRBufferList.Core
 
         private void TimerOnElapsed(object sender)
         {
-            Clear().ConfigureAwait(false);
+            Clear();
         }
 
-        private async Task RaiseEventAsync(IReadOnlyList<T> removed)
+        private void DispatchEvents(IReadOnlyList<T> removed)
         {
             if (!removed.Any()) return;
 
             try
             {
-                if (ClearedAsync != null)
-                {
-                    await ClearedAsync(removed);
-                    return;
-                }
-
                 Cleared?.Invoke(removed);
             }
             catch

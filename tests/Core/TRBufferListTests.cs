@@ -169,29 +169,6 @@ namespace TRBufferList.Core.Tests
         }
 
         [Fact]
-        public void GivenBufferShouldCleanAsync()
-        {
-            var count = 0;
-            var list = new BufferList<int>(100, TimeSpan.FromSeconds(1));
-            
-            var autoReset = new AutoResetEvent(false);
-            list.ClearedAsync += removed =>
-            {
-                count = removed.Count();
-                autoReset.Set();
-                return Task.CompletedTask;
-            };
-            
-            for (var i = 0; i < 100; i++)
-            {
-                list.Add(i);
-            }
-
-            autoReset.WaitOne(TimeSpan.FromSeconds(5)).Should().BeTrue();
-            count.Should().Be(100);
-        }
-
-        [Fact]
         public void GivenBufferShouldTryToCleanListUntilBagIsEmpty()
         {
             var read = 0;
@@ -220,7 +197,7 @@ namespace TRBufferList.Core.Tests
         {
             var waitTime = TimeSpan.FromSeconds(1);
             const int capacity = 10;
-            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan);
+            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan, capacity);
             for (var i = 1; i < capacity; i++)
             {
                 list.Add(i);
