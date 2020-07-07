@@ -11,6 +11,7 @@ namespace TRBufferList.Core
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
+        private const int BLOCK_CAPACITY_DEFAULT_MULTIPLIER = 2;
         private readonly TimeSpan _clearTtl;
         private readonly ConcurrentBag<T> _bag;
         private readonly ConcurrentBag<T> _failedBag;
@@ -25,16 +26,18 @@ namespace TRBufferList.Core
         /// </summary>
         /// <param name="capacity">Limit of items.</param>
         /// <param name="clearTtl">Time to clean list when idle.</param>
-        /// <param name="blockCapacity">Limit to block new items.</param>
-        public BufferList(int capacity, TimeSpan clearTtl, int? blockCapacity = null)
+        /// <param name="blockCapacityMultiplier">Multiplier applied over capacity to block new items.</param>
+        public BufferList(int capacity, TimeSpan clearTtl, int blockCapacityMultiplier = BLOCK_CAPACITY_DEFAULT_MULTIPLIER)
         {
+            if (blockCapacityMultiplier < 1)
+                throw new ArgumentException("The value should be greater than 1.", nameof(blockCapacityMultiplier));
             _autoResetEvent = new AutoResetEvent(false);
             _clearTtl = clearTtl;
             _timer = new Timer(TimerOnElapsed, null, clearTtl, Timeout.InfiniteTimeSpan);
             _bag = new ConcurrentBag<T>();
             _failedBag = new ConcurrentBag<T>();
             Capacity = capacity;
-            BlockCapacity = blockCapacity ?? capacity * 2;
+            BlockCapacity = capacity * blockCapacityMultiplier;
             _isCleanningRunning = false;
         }
 

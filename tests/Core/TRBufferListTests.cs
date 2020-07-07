@@ -197,7 +197,7 @@ namespace TRBufferList.Core.Tests
         {
             var waitTime = TimeSpan.FromSeconds(1);
             const int capacity = 10;
-            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan, capacity);
+            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan, 1);
             for (var i = 1; i < capacity; i++)
             {
                 list.Add(i);
