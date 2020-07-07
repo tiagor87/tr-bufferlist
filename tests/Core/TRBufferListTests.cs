@@ -208,7 +208,7 @@ namespace TRBufferList.Core.Tests
                 Task.Factory.StartNew(() => list.Add(11)));
             task.ExecutionTimeOf(x => x.Wait())
                 .Should()
-                .BeGreaterOrEqualTo(waitTime - TimeSpan.FromMilliseconds(200));
+                .BeGreaterOrEqualTo(waitTime);
         }
 
         [Fact]
@@ -223,6 +223,14 @@ namespace TRBufferList.Core.Tests
             list.Clear();
             
             list.Count.Should().Be(1);
+        }
+
+        [Fact]
+        public void GivenBufferWhenBlockCapacityIsInvalidShouldThrow()
+        {
+            Action action = () => new BufferList<int>(10, Timeout.InfiniteTimeSpan, 0);
+
+            action.Should().Throw<ArgumentException>();
         }
     }
 }
