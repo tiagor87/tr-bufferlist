@@ -23,6 +23,7 @@ namespace TRBufferList.Core
         private bool _disposed;
         private bool _isDisposing;
         private bool _isCleanningRunning;
+        private ConcurrentDictionary<int, Task> _addTasks;
 
         /// <summary>
         /// Initialize a new instance of BufferList.
@@ -42,6 +43,7 @@ namespace TRBufferList.Core
             Capacity = capacity;
             BlockCapacity = capacity * blockCapacityMultiplier;
             _isCleanningRunning = false;
+            _addTasks = new ConcurrentDictionary<int, Task>();
         }
 
         public void Dispose()
@@ -94,22 +96,27 @@ namespace TRBufferList.Core
         /// <param name="item">The item to add.</param>
         public void Add(T item)
         {
-            while (_bag.Count >= BlockCapacity)
-            {
-                _autoResetEvent.Wait(TimeSpan.FromMilliseconds(200));
-            }
-
-            if (_isDisposing) throw new InvalidOperationException("The buffer is disposing.");
+            if (_isDisposing) throw new InvalidOperationException("The buffer has been disposed.");
             
-            _bag.Add(item);
-
-            if (_isCleanningRunning || !IsFull)
+            var task = Task.Factory.StartNew(async () =>
             {
-                RestartTimer();
-                return;
-            }
+                while (!_isDisposing && _bag.Count >= BlockCapacity)
+                {
+                    _autoResetEvent.Wait(TimeSpan.FromMilliseconds(200));
+                }
+                
+                _bag.Add(item);
+
+                if (_isCleanningRunning || !IsFull)
+                {
+                    RestartTimer();
+                    return;
+                }
             
-            Clear().ConfigureAwait(false);
+                await Clear();
+            });
+            _addTasks.TryAdd(task.Id, task);
+            task.ContinueWith(t => _addTasks.TryRemove(t.Id, out _));
         }
 
         /// <summary>
@@ -239,6 +246,7 @@ namespace TRBufferList.Core
         private void FullClear(TimeSpan timeout)
         {
             var source = new CancellationTokenSource(timeout);
+            Task.WaitAll(_addTasks.Values.ToArray(), source.Token);
             while (!source.IsCancellationRequested && (!_bag.IsEmpty || !_failedBag.IsEmpty))
             {
                 Clear().Wait(source.Token);
