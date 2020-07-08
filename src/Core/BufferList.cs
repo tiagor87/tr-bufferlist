@@ -2,8 +2,10 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace TRBufferList.Core
 {
@@ -17,8 +19,9 @@ namespace TRBufferList.Core
         private readonly ConcurrentBag<T> _failedBag;
         private readonly object _sync = new object();
         private readonly Timer _timer;
-        private readonly AutoResetEvent _autoResetEvent;
+        private readonly ManualResetEventSlim _autoResetEvent;
         private bool _disposed;
+        private bool _isDisposing;
         private bool _isCleanningRunning;
 
         /// <summary>
@@ -31,7 +34,7 @@ namespace TRBufferList.Core
         {
             if (blockCapacityMultiplier < 1)
                 throw new ArgumentException("The value should be greater than 1.", nameof(blockCapacityMultiplier));
-            _autoResetEvent = new AutoResetEvent(false);
+            _autoResetEvent = new ManualResetEventSlim(false);
             _clearTtl = clearTtl;
             _timer = new Timer(TimerOnElapsed, null, clearTtl, Timeout.InfiniteTimeSpan);
             _bag = new ConcurrentBag<T>();
@@ -91,57 +94,62 @@ namespace TRBufferList.Core
         /// <param name="item">The item to add.</param>
         public void Add(T item)
         {
-            if (_isCleanningRunning || _bag.Count >= BlockCapacity)
+            while (_bag.Count >= BlockCapacity)
             {
-                _autoResetEvent.WaitOne();
+                _autoResetEvent.Wait(TimeSpan.FromMilliseconds(200));
             }
+
+            if (_isDisposing) throw new InvalidOperationException("The buffer is disposing.");
             
             _bag.Add(item);
 
-            if (!IsFull)
+            if (_isCleanningRunning || !IsFull)
             {
                 RestartTimer();
                 return;
             }
             
-            Clear();
+            Clear().ConfigureAwait(false);
         }
 
         /// <summary>
         /// Clear the list.
         /// </summary>
-        public void Clear()
+        public Task Clear()
         {
-            if (_bag.IsEmpty && _failedBag.IsEmpty || _isCleanningRunning) return;
+            if (_bag.IsEmpty && _failedBag.IsEmpty || _isCleanningRunning) return Task.CompletedTask;
 
             lock (_sync)
             {
-                if (_isCleanningRunning) return;
+                if (_isCleanningRunning) return Task.CompletedTask;
                 _isCleanningRunning = true;
             }
 
             StopTimer();
 
+            var stopwatch = new Stopwatch();
+            stopwatch.Start();
             List<T> removed = null;
             try
             {
-                while (!_bag.IsEmpty)
+                do
                 {
                     removed = GetElementsFromBag(_bag);
                     DispatchEvents(removed);
-                }
+                } while (_bag.Count >= Capacity);
 
-                if (_failedBag.IsEmpty) return;
+                if (_failedBag.IsEmpty) return Task.CompletedTask;
                 
                 removed = GetElementsFromBag(_failedBag);
                 DispatchEvents(removed);
+                return Task.CompletedTask;
             }
             finally
             {
-                removed?.Clear();
-                StartTimer();
                 _isCleanningRunning = false;
                 _autoResetEvent.Set();
+                StartTimer();
+                removed?.Clear();
             }
         }
 
@@ -163,10 +171,11 @@ namespace TRBufferList.Core
         private void Dispose(bool disposing)
         {
             if (_disposed) return;
-
+            
+            _isDisposing = true;
             if (disposing)
             {
-                Clear();
+                FullClear(TimeSpan.FromSeconds(10));
                 _timer.Dispose();
                 Disposed?.Invoke(GetFailed().ToList());
             }
@@ -176,7 +185,7 @@ namespace TRBufferList.Core
 
         private void TimerOnElapsed(object sender)
         {
-            Clear();
+            Clear().ConfigureAwait(false);
         }
 
         private void DispatchEvents(IReadOnlyList<T> removed)
@@ -225,6 +234,15 @@ namespace TRBufferList.Core
                 if (bag.TryTake(out var item)) list.Add(item);
             }
             return list;
+        }
+
+        private void FullClear(TimeSpan timeout)
+        {
+            var source = new CancellationTokenSource(timeout);
+            while (!source.IsCancellationRequested && (!_bag.IsEmpty || !_failedBag.IsEmpty))
+            {
+                Clear().Wait(source.Token);
+            }
         }
     }
 }
