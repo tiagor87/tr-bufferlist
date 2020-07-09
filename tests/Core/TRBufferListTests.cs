@@ -232,5 +232,48 @@ namespace TRBufferList.Core.Tests
 
             action.Should().Throw<ArgumentException>();
         }
+
+        [Fact]
+        public async Task GivenBufferListWhenDisposeShouldFullClearList()
+        {
+            var count = 0;
+            var source = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan, 5);
+            list.Cleared += removed => Interlocked.Add(ref count, removed.Count);
+            var tasks = new Task[10];
+            var expected = 0;
+            for (var i = 0; i < 10; i++)
+            {
+                tasks[i] = Task.Factory.StartNew(async () =>
+                {
+                    while (!source.Token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            list.Add(i);
+                            Interlocked.Increment(ref expected);
+                            await Task.Delay(10);
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+            
+            var autoResetEvent = new AutoResetEvent(false);
+            source.Token.Register(() =>
+            {
+                list.Dispose();
+                autoResetEvent.Set();
+            });
+
+            autoResetEvent.WaitOne();
+            await Task.WhenAll(tasks);
+
+            count.Should().Be(expected);
+        }
     }
 }
