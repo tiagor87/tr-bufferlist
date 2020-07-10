@@ -193,25 +193,6 @@ namespace TRBufferList.Core.Tests
         }
 
         [Fact]
-        public void GivenBufferShouldWaitToAddWhenFull()
-        {
-            var waitTime = TimeSpan.FromSeconds(1);
-            const int capacity = 10;
-            var list = new BufferList<int>(capacity, Timeout.InfiniteTimeSpan, 1);
-            for (var i = 1; i < capacity; i++)
-            {
-                list.Add(i);
-            }
-
-            list.Cleared += items => Task.Delay(waitTime).Wait();
-            var task = Task.WhenAny(Task.Factory.StartNew(() => list.Add(10)),
-                Task.Factory.StartNew(() => list.Add(11)));
-            task.ExecutionTimeOf(x => x.Wait())
-                .Should()
-                .BeGreaterOrEqualTo(waitTime);
-        }
-
-        [Fact]
         public void GivenBufferShouldCountFailedList()
         {
             var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan)

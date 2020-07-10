@@ -14,36 +14,38 @@ namespace TRBufferList.Core
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
         private const int BLOCK_CAPACITY_DEFAULT_MULTIPLIER = 2;
-        private readonly TimeSpan _clearTtl;
-        private readonly ConcurrentBag<T> _bag;
-        private readonly ConcurrentBag<T> _failedBag;
+        private readonly BufferListOptions _options;
+        private readonly ConcurrentQueue<T> _mainQueue;
+        private readonly ConcurrentQueue<T> _secondaryQueue;
         private readonly object _sync = new object();
         private readonly Timer _timer;
         private readonly ManualResetEventSlim _autoResetEvent;
         private bool _disposed;
         private bool _isDisposing;
-        private bool _isCleanningRunning;
-        private ConcurrentDictionary<int, Task> _addTasks;
+        private bool _isClearingRunning;
 
         /// <summary>
         /// Initialize a new instance of BufferList.
         /// </summary>
-        /// <param name="capacity">Limit of items.</param>
+        /// <param name="batchingSize">Clear batching size.</param>
         /// <param name="clearTtl">Time to clean list when idle.</param>
-        /// <param name="blockCapacityMultiplier">Multiplier applied over capacity to block new items.</param>
-        public BufferList(int capacity, TimeSpan clearTtl, int blockCapacityMultiplier = BLOCK_CAPACITY_DEFAULT_MULTIPLIER)
+        /// <param name="maxSizeMultiplier">Multiplier applied over batching size to achieve max size.</param>
+        public BufferList(int batchingSize, TimeSpan clearTtl, int maxSizeMultiplier = BLOCK_CAPACITY_DEFAULT_MULTIPLIER) : this(
+            new BufferListOptions(batchingSize, clearTtl, batchingSize * maxSizeMultiplier, TimeSpan.FromSeconds(10),
+                TimeSpan.FromMilliseconds(100)))
         {
-            if (blockCapacityMultiplier < 1)
-                throw new ArgumentException("The value should be greater than 1.", nameof(blockCapacityMultiplier));
+            if (maxSizeMultiplier < 1)
+                throw new ArgumentException("The value should be greater than 1.", nameof(maxSizeMultiplier));
+        }
+
+        public BufferList(BufferListOptions options)
+        {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
             _autoResetEvent = new ManualResetEventSlim(false);
-            _clearTtl = clearTtl;
-            _timer = new Timer(TimerOnElapsed, null, clearTtl, Timeout.InfiniteTimeSpan);
-            _bag = new ConcurrentBag<T>();
-            _failedBag = new ConcurrentBag<T>();
-            Capacity = capacity;
-            BlockCapacity = capacity * blockCapacityMultiplier;
-            _isCleanningRunning = false;
-            _addTasks = new ConcurrentDictionary<int, Task>();
+            _timer = new Timer(OnTimerElapsed, null, _options.IdleClearTtl, Timeout.InfiniteTimeSpan);
+            _mainQueue = new ConcurrentQueue<T>();
+            _secondaryQueue = new ConcurrentQueue<T>();
+            _isClearingRunning = false;
         }
 
         public void Dispose()
@@ -55,32 +57,32 @@ namespace TRBufferList.Core
         /// <summary>
         /// Get the quantity of items in list.
         /// </summary>
-        public int Count => _bag.Count + _failedBag.Count;
+        public int Count => _mainQueue.Count + _secondaryQueue.Count;
 
         /// <summary>
-        /// Get the limit of items to start cleanning.
+        /// Get the capacity of the list.
         /// </summary>
-        public int Capacity { get; }
-        
-        /// <summary>
-        /// Get the limit to block add new items.
-        /// </summary>
-        public int BlockCapacity { get; }
+        public int Capacity => _options.ClearBatchingSize;
 
         public bool IsReadOnly => false;
         
         /// <summary>
-        /// Get the status if buffer is full.
+        /// Checks if buffer size is greater than batching size.
         /// </summary>
-        public bool IsFull => _bag.Count >= Capacity;
+        public bool IsBusy => _mainQueue.Count >= _options.ClearBatchingSize;
+
+        /// <summary>
+        /// Checks if buffer size is greater than max size.
+        /// </summary>
+        public bool IsOverworked => _mainQueue.Count >= _options.MaxSize;
 
         /// <summary>
         /// Get items that failed to publish.
         /// </summary>
         /// <returns>List of items.</returns>
-        public IReadOnlyList<T> GetFailed() => _failedBag.ToList();
+        public IReadOnlyList<T> GetFailed() => _secondaryQueue.ToList();
 
-        public IEnumerator<T> GetEnumerator() => _bag.ToList().GetEnumerator();
+        public IEnumerator<T> GetEnumerator() => _mainQueue.ToList().GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator()
         {
@@ -98,25 +100,21 @@ namespace TRBufferList.Core
         {
             if (_isDisposing) throw new InvalidOperationException("The buffer has been disposed.");
             
-            var task = Task.Factory.StartNew(async () =>
+            while (!_isDisposing && IsOverworked)
             {
-                while (!_isDisposing && _bag.Count >= BlockCapacity)
-                {
-                    _autoResetEvent.Wait(TimeSpan.FromMilliseconds(200));
-                }
-                
-                _bag.Add(item);
-
-                if (_isCleanningRunning || !IsFull)
-                {
-                    RestartTimer();
-                    return;
-                }
+                _autoResetEvent.Wait(_options.MaxSizeWaitingDelay);
+            }
             
-                await Clear();
-            });
-            _addTasks.TryAdd(task.Id, task);
-            task.ContinueWith(t => _addTasks.TryRemove(t.Id, out _));
+            _mainQueue.Enqueue(item);
+
+            if (_isClearingRunning) return;
+            if (!IsBusy)
+            {
+                RestartTimer();
+                return;
+            }
+
+            Clear().ConfigureAwait(false);
         }
 
         /// <summary>
@@ -124,39 +122,43 @@ namespace TRBufferList.Core
         /// </summary>
         public Task Clear()
         {
-            if (_bag.IsEmpty && _failedBag.IsEmpty || _isCleanningRunning) return Task.CompletedTask;
+            if (_isClearingRunning || _mainQueue.IsEmpty && _secondaryQueue.IsEmpty) return Task.CompletedTask;
 
             lock (_sync)
             {
-                if (_isCleanningRunning) return Task.CompletedTask;
-                _isCleanningRunning = true;
+                if (_isClearingRunning) return Task.CompletedTask;
+                _isClearingRunning = true;
             }
 
             StopTimer();
-
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
-            List<T> removed = null;
+            
+            List<T> batch = null;
             try
             {
                 do
                 {
-                    removed = GetElementsFromBag(_bag);
-                    DispatchEvents(removed);
-                } while (_bag.Count >= Capacity);
+                    batch = DequeueBatch(_mainQueue);
+                    DispatchEvents(batch);
+                } while (IsBusy);
 
-                if (_failedBag.IsEmpty) return Task.CompletedTask;
-                
-                removed = GetElementsFromBag(_failedBag);
-                DispatchEvents(removed);
+                if (_secondaryQueue.IsEmpty) return Task.CompletedTask;
+
+                // Executo uma única vez para prevenir loop infinito.
+                batch = DequeueBatch(_secondaryQueue);
+                DispatchEvents(batch);
+                return Task.CompletedTask;
+            }
+            catch
+            {
+                // Ignore any exception
                 return Task.CompletedTask;
             }
             finally
             {
-                _isCleanningRunning = false;
+                _isClearingRunning = false;
                 _autoResetEvent.Set();
                 StartTimer();
-                removed?.Clear();
+                batch?.Clear();
             }
         }
 
@@ -179,41 +181,49 @@ namespace TRBufferList.Core
         {
             if (_disposed) return;
             
-            _isDisposing = true;
             if (disposing)
             {
-                FullClear(TimeSpan.FromSeconds(10));
-                _timer.Dispose();
+                _isDisposing = true;
+                Flush(_options.DisposeTimeout);
                 Disposed?.Invoke(GetFailed().ToList());
+                _timer.Dispose();
             }
 
             _disposed = true;
         }
 
-        private void TimerOnElapsed(object sender)
+        private void OnTimerElapsed(object sender)
         {
             Clear().ConfigureAwait(false);
         }
 
-        private void DispatchEvents(IReadOnlyList<T> removed)
+        /// <summary>
+        /// Execute clear event for items removed from bag.
+        /// </summary>
+        /// <param name="items"></param>
+        private void DispatchEvents(IReadOnlyList<T> items)
         {
-            if (!removed.Any()) return;
+            if (!items.Any()) return;
 
             try
             {
-                Cleared?.Invoke(removed);
+                Cleared?.Invoke(items);
             }
             catch
             {
-                AddRangeToFailed(removed);
+                AddItemsToFailed(items);
             }
         }
         
-        private void AddRangeToFailed(IEnumerable<T> items)
+        /// <summary>
+        /// Add items to failed bag.
+        /// </summary>
+        /// <param name="items"></param>
+        private void AddItemsToFailed(IReadOnlyList<T> items)
         {
             foreach (var item in items)
             {
-                _failedBag.Add(item);
+                _secondaryQueue.Enqueue(item);
             }
         }
 
@@ -225,7 +235,7 @@ namespace TRBufferList.Core
 
         private void StartTimer()
         {
-            _timer.Change(_clearTtl, Timeout.InfiniteTimeSpan);
+            _timer.Change(_options.IdleClearTtl, Timeout.InfiniteTimeSpan);
         }
         
         private void StopTimer()
@@ -233,23 +243,38 @@ namespace TRBufferList.Core
             _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
         
-        private List<T> GetElementsFromBag(ConcurrentBag<T> bag)
+        /// <summary>
+        /// Get items from bag with exactly capacity quantity.
+        /// </summary>
+        /// <param name="queue"></param>
+        /// <returns>List of items.</returns>
+        private List<T> DequeueBatch(ConcurrentQueue<T> queue)
         {
-            var list = new List<T>();
-            while (!bag.IsEmpty && list.Count < Capacity)
+            var list = new List<T>(Math.Min(_options.ClearBatchingSize, queue.Count));
+            while (!queue.IsEmpty && list.Count < _options.ClearBatchingSize)
             {
-                if (bag.TryTake(out var item)) list.Add(item);
+                if (queue.TryDequeue(out var item)) list.Add(item);
             }
             return list;
         }
 
-        private void FullClear(TimeSpan timeout)
+        /// <summary>
+        /// Wait for all add tasks to finish, then execute clear until bag and failed bad are empties.
+        /// </summary>
+        /// <param name="timeout"></param>
+        private void Flush(TimeSpan timeout)
         {
             var source = new CancellationTokenSource(timeout);
-            Task.WaitAll(_addTasks.Values.ToArray(), source.Token);
-            while (!source.IsCancellationRequested && (!_bag.IsEmpty || !_failedBag.IsEmpty))
+            while (!source.IsCancellationRequested && (!_mainQueue.IsEmpty || !_secondaryQueue.IsEmpty))
             {
-                Clear().Wait(source.Token);
+                try
+                {
+                    Clear().Wait(source.Token);
+                }
+                catch
+                {
+                    // ignored
+                }
             }
         }
     }
