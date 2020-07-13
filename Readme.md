@@ -39,7 +39,7 @@ It is triggered when:
 
 ## Failure recover
 
-When an exception is throw on **Cleared**, the cleared items are added to a failure queue, and on every **Clear** it will try to process the list again respecting the batching size.
+When an exception is thrown in the Cleared event, the items are added to a fault queue and, in each Clear, it tries to process the list again respecting the batching size.
 
 ## How to use
 
