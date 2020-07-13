@@ -35,7 +35,7 @@ It is triggered when:
 ### Disposed
 
 It is triggered when:
-* The cleanup failed and added some items to the fault list.
+* The list is processing the disposal and the complete cleaning fails, so some items are still on the fault list.
 
 ## Failure recover
 
