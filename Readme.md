@@ -1,3 +1,7 @@
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=tiagor87_tr-bufferlist&metric=coverage)](https://sonarcloud.io/dashboard?id=tiagor87_tr-bufferlist)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=tiagor87_tr-bufferlist&metric=alert_status)](https://sonarcloud.io/dashboard?id=tiagor87_tr-bufferlist)
+[![NuGet](https://buildstats.info/nuget/TRBufferList.Core)](http://www.nuget.org/packages/TRBufferList.Core)
+
 # BufferList
 
 BufferList is a component that serves to store components and release them after a period of idle time or when reaching a predefined limit.
