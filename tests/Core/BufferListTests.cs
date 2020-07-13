@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -143,13 +144,22 @@ namespace TRBufferList.Core.Tests
         [Fact]
         public void GivenBufferWhenThrowOnClearingShouldRequeue()
         {
-            var list = new BufferList<int>(100, TimeSpan.FromSeconds(1));
+            const int BATCHING_SIZE = 100;
+            var list = new BufferList<int>(BATCHING_SIZE, TimeSpan.FromSeconds(1));
+            var faultCount = 0;
             list.Cleared += removed => throw new Exception();
-            list.Disposed += failed => failed.Should().HaveCount(1000);
-            for (var i = 0; i < 1000; i++) list.Add(i);
-            list.Capacity.Should().Be(100);
-            list.GetFailed().Should().NotBeEmpty();
+            list.Disposed += failed => Interlocked.Add(ref faultCount, failed.Count);
+            list.Dropped += dropped => Interlocked.Add(ref faultCount, dropped.Count);
+
+            for (var i = 0; i < 1000; i++)
+            {
+                list.Add(i);
+            }
+            
             list.Dispose();
+            list.Capacity.Should().Be(BATCHING_SIZE * BufferListOptions.MAX_SIZE_BATCHING_MULTIPLIER
+                                      + BATCHING_SIZE * BufferListOptions.MAX_FAULT_SIZE_BATCHING_MULTIPLIER);
+            faultCount.Should().Be(1000);
         }
 
         [Fact]
@@ -164,8 +174,9 @@ namespace TRBufferList.Core.Tests
             };
 
             list.Add(1);
-            dispatched.Should().Be(2);
-            list.GetFailed().Should().HaveCount(1);
+            list.Add(2);
+            dispatched.Should().Be(3);
+            list.GetFailed().Should().HaveCount(2);
         }
 
         [Fact]
@@ -207,20 +218,12 @@ namespace TRBufferList.Core.Tests
         }
 
         [Fact]
-        public void GivenBufferWhenBlockCapacityIsInvalidShouldThrow()
-        {
-            Action action = () => new BufferList<int>(10, Timeout.InfiniteTimeSpan, 0);
-
-            action.Should().Throw<ArgumentException>();
-        }
-
-        [Fact]
         public async Task GivenBufferListWhenDisposeShouldFullClearList()
         {
             var count = 0;
             var source = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
-            var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan, 5);
+            var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan);
             list.Cleared += removed => Interlocked.Add(ref count, removed.Count);
             var tasks = new Task[10];
             var expected = 0;
@@ -230,16 +233,9 @@ namespace TRBufferList.Core.Tests
                 {
                     while (!source.Token.IsCancellationRequested)
                     {
-                        try
-                        {
-                            list.Add(i);
-                            Interlocked.Increment(ref expected);
-                            await Task.Delay(10);
-                        }
-                        catch (InvalidOperationException)
-                        {
-                            break;
-                        }
+                        list.Add(i);
+                        Interlocked.Increment(ref expected);
+                        await Task.Delay(10);
                     }
                 });
             }
@@ -255,6 +251,41 @@ namespace TRBufferList.Core.Tests
             await Task.WhenAll(tasks);
 
             count.Should().Be(expected);
+        }
+
+        [Fact]
+        public void GivenBufferListWhenFaultListFullShouldDrop()
+        {
+            var list = new BufferList<int>(new BufferListOptions(
+                1,
+                1,
+                1,
+                Timeout.InfiniteTimeSpan,
+                TimeSpan.FromMilliseconds(10),
+                TimeSpan.FromMilliseconds(100)));
+
+            var dropped = new List<int>(1);
+            list.Cleared += _ => throw new Exception();
+            list.Dropped += items => dropped.AddRange(items);
+
+            list.Add(1);
+            list.Add(2);
+            dropped.Should().HaveCount(1);
+            dropped.First().Should().Be(1);
+            list.GetFailed().Should().HaveCount(1);
+            list.GetFailed().First().Should().Be(2);
+        }
+
+        [Fact]
+        public void GivenBufferListWhenAddAndDisposedShouldThrow()
+        {
+            var list = new BufferList<int>(1, Timeout.InfiniteTimeSpan);
+            list.Dispose();
+
+            Action action = () => list.Add(1);
+
+            action.Should().Throw<InvalidOperationException>()
+                .WithMessage("The buffer has been disposed.");
         }
     }
 }

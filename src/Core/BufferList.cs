@@ -13,10 +13,9 @@ namespace TRBufferList.Core
 
     public sealed class BufferList<T> : IEnumerable<T>, IDisposable
     {
-        private const int BLOCK_CAPACITY_DEFAULT_MULTIPLIER = 2;
         private readonly BufferListOptions _options;
         private readonly ConcurrentQueue<T> _mainQueue;
-        private readonly ConcurrentQueue<T> _failureQueue;
+        private readonly ConcurrentQueue<T> _faultQueue;
         private readonly object _sync = new object();
         private readonly Timer _timer;
         private readonly ManualResetEventSlim _autoResetEvent;
@@ -29,13 +28,8 @@ namespace TRBufferList.Core
         /// </summary>
         /// <param name="batchingSize">Clear batching size.</param>
         /// <param name="clearTtl">Time to clean list when idle.</param>
-        /// <param name="maxSizeMultiplier">Multiplier applied over batching size to achieve max size.</param>
-        public BufferList(int batchingSize, TimeSpan clearTtl, int maxSizeMultiplier = BLOCK_CAPACITY_DEFAULT_MULTIPLIER) : this(
-            new BufferListOptions(batchingSize, clearTtl, batchingSize * maxSizeMultiplier, TimeSpan.FromSeconds(10),
-                TimeSpan.FromMilliseconds(100), batchingSize * maxSizeMultiplier))
+        public BufferList(int batchingSize, TimeSpan clearTtl) : this(BufferListOptions.Simple(batchingSize, clearTtl))
         {
-            if (maxSizeMultiplier < 1)
-                throw new ArgumentException("The value should be greater than 1.", nameof(maxSizeMultiplier));
         }
 
         public BufferList(BufferListOptions options)
@@ -44,7 +38,7 @@ namespace TRBufferList.Core
             _autoResetEvent = new ManualResetEventSlim(false);
             _timer = new Timer(OnTimerElapsed, null, _options.IdleClearTtl, Timeout.InfiniteTimeSpan);
             _mainQueue = new ConcurrentQueue<T>();
-            _failureQueue = new ConcurrentQueue<T>();
+            _faultQueue = new ConcurrentQueue<T>();
             _isClearingRunning = false;
         }
 
@@ -57,12 +51,12 @@ namespace TRBufferList.Core
         /// <summary>
         /// Get the quantity of items in list.
         /// </summary>
-        public int Count => _mainQueue.Count + _failureQueue.Count;
+        public int Count => _mainQueue.Count + _faultQueue.Count;
 
         /// <summary>
         /// Get the capacity of the list.
         /// </summary>
-        public int Capacity => _options.MaxSize + _options.MaxFailureSize;
+        public int Capacity => _options.MaxSize + _options.MaxFaultSize;
 
         public bool IsReadOnly => false;
         
@@ -70,6 +64,11 @@ namespace TRBufferList.Core
         /// Checks if buffer size is greater than batching size.
         /// </summary>
         public bool IsReadyToClear => _mainQueue.Count >= _options.ClearBatchingSize;
+
+        /// <summary>
+        /// Checks if fault queue size is greater than max fault size.
+        /// </summary>
+        public bool IsFaultListFull => _faultQueue.Count >= _options.MaxFaultSize;
 
         /// <summary>
         /// Checks if buffer size is greater than max size.
@@ -80,7 +79,7 @@ namespace TRBufferList.Core
         /// Get items that failed to publish.
         /// </summary>
         /// <returns>List of items.</returns>
-        public IReadOnlyList<T> GetFailed() => _failureQueue.ToList();
+        public IReadOnlyList<T> GetFailed() => _faultQueue.ToList();
 
         public IEnumerator<T> GetEnumerator() => _mainQueue.ToList().GetEnumerator();
 
@@ -132,22 +131,24 @@ namespace TRBufferList.Core
             List<T> batch = null;
             try
             {
+                // Perform first in an attempt to maintain order
+                // and just once to avoid an infinity looping
+                if (!_faultQueue.IsEmpty)
+                {
+                    batch = DequeueBatch(_faultQueue);
+                    DispatchEvents(batch);
+                }
+                
                 do
                 {
                     batch = DequeueBatch(_mainQueue);
                     DispatchEvents(batch);
                 } while (IsReadyToClear);
 
-                if (_failureQueue.IsEmpty) return Task.CompletedTask;
-
-                // It executes just once to avoid infinity looping
-                batch = DequeueBatch(_failureQueue);
-                DispatchEvents(batch);
                 return Task.CompletedTask;
             }
             catch
             {
-                // Ignore any exception
                 return Task.CompletedTask;
             }
             finally
@@ -224,11 +225,11 @@ namespace TRBufferList.Core
             var dropped = new List<T>(items.Count);
             foreach (var item in items)
             {
-                if (_failureQueue.Count > _options.MaxFailureSize && _failureQueue.TryDequeue(out var drop))
+                if (IsFaultListFull && _faultQueue.TryDequeue(out var drop))
                 {
                     dropped.Add(drop);
                 }
-                _failureQueue.Enqueue(item);
+                _faultQueue.Enqueue(item);
             }
             
             if (dropped.Any()) Dropped?.Invoke(dropped);
@@ -252,7 +253,7 @@ namespace TRBufferList.Core
 
         private bool TryStartClearing()
         {
-            if (_isClearingRunning || _mainQueue.IsEmpty && _failureQueue.IsEmpty) return false;
+            if (_isClearingRunning || _mainQueue.IsEmpty && _faultQueue.IsEmpty) return false;
 
             lock (_sync)
             {
@@ -293,7 +294,7 @@ namespace TRBufferList.Core
         private void Flush(TimeSpan timeout)
         {
             var source = new CancellationTokenSource(timeout);
-            while (!source.IsCancellationRequested && (!_mainQueue.IsEmpty || !_failureQueue.IsEmpty))
+            while (!source.IsCancellationRequested && (!_mainQueue.IsEmpty || !_faultQueue.IsEmpty))
             {
                 try
                 {

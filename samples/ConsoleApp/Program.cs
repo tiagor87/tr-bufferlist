@@ -12,7 +12,7 @@ namespace ConsoleApp
             ThreadPool.SetMinThreads(250, 500);
 
             var source = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            var buffer = new BufferList<string>(300, TimeSpan.FromSeconds(5), 3);
+            var buffer = new BufferList<string>(300, TimeSpan.FromSeconds(5));
             buffer.Cleared += items =>
             {
                 Task.Delay(10).GetAwaiter().GetResult();
