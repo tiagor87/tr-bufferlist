@@ -98,7 +98,7 @@ namespace TRBufferList.Core
         {
             if (_isDisposing) throw new InvalidOperationException("The buffer has been disposed.");
 
-            HandleWaiting();
+            Wait();
             
             _mainQueue.Enqueue(item);
 
@@ -112,7 +112,7 @@ namespace TRBufferList.Core
             Clear().ConfigureAwait(false);
         }
 
-        private void HandleWaiting()
+        private void Wait()
         {
             while (!_isDisposing && IsOverloaded)
             {
@@ -184,7 +184,7 @@ namespace TRBufferList.Core
             if (disposing)
             {
                 _isDisposing = true;
-                Flush(_options.DisposeTimeout);
+                CleanUp(_options.DisposeTimeout);
                 Disposed?.Invoke(GetFailed());
                 _timer.Dispose();
             }
@@ -290,7 +290,7 @@ namespace TRBufferList.Core
         /// Wait for all add tasks to finish, then execute clear until bag and failed bad are empties.
         /// </summary>
         /// <param name="timeout"></param>
-        private void Flush(TimeSpan timeout)
+        private void CleanUp(TimeSpan timeout)
         {
             var source = new CancellationTokenSource(timeout);
             while (!source.IsCancellationRequested && (!_mainQueue.IsEmpty || !_faultQueue.IsEmpty))
