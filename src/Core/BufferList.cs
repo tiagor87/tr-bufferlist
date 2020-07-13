@@ -72,7 +72,7 @@ namespace TRBufferList.Core
         /// <summary>
         /// Checks if buffer size is greater than max size.
         /// </summary>
-        public bool IsOverworked => _mainQueue.Count >= _options.MaxSize;
+        public bool IsOverloaded => _mainQueue.Count >= _options.MaxSize;
 
         /// <summary>
         /// Get items that failed to publish.
@@ -114,7 +114,7 @@ namespace TRBufferList.Core
 
         private void HandleWaiting()
         {
-            while (!_isDisposing && IsOverworked)
+            while (!_isDisposing && IsOverloaded)
             {
                 _autoResetEvent.Wait(_options.MaxSizeWaitingDelay);
             }
