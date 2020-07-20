@@ -6,7 +6,6 @@ namespace TRBufferList.Core
     {
         public static readonly TimeSpan MAX_DISPOSE_TIMEOUT = TimeSpan.FromSeconds(10);
         public static readonly TimeSpan MAX_SIZE_WAITING_DELAY = TimeSpan.FromSeconds(1);
-        public const int MAX_SIZE_BATCHING_MULTIPLIER = 2;
         public const int MAX_FAULT_SIZE_BATCHING_MULTIPLIER = 3;
         
         /// <summary>
@@ -19,10 +18,10 @@ namespace TRBufferList.Core
         /// <param name="maxSizeWaitingDelay">Waiting time in each scan iteration for processing when the list is overloaded.</param>
         /// <param name="disposeTimeout">Maximum waiting time to perform a complete clean-up during disposal.</param>
         /// <exception cref="ArgumentException">Occurred when any parameter is invalid.</exception>
-        public BufferListOptions(int clearBatchingSize, int maxSize, int maxFaultSize, TimeSpan idleClearTtl, TimeSpan maxSizeWaitingDelay, TimeSpan disposeTimeout)
+        public BufferListOptions(int clearBatchingSize, int? maxSize, int maxFaultSize, TimeSpan idleClearTtl, TimeSpan maxSizeWaitingDelay, TimeSpan disposeTimeout)
         {
             if (clearBatchingSize <= 0) throw new ArgumentException("The \"clear batching size\" must be greater than zero.", nameof(clearBatchingSize));
-            if (maxSize < clearBatchingSize) throw new ArgumentException("The \"max size\" must be greater than \"clear batching size\".", nameof(maxSize));
+            if (maxSize.HasValue && maxSize < clearBatchingSize) throw new ArgumentException("The \"max size\" must be greater than \"clear batching size\".", nameof(maxSize));
             if (maxFaultSize < clearBatchingSize) throw new ArgumentException("The \"max fault size\" must be greater than \"clear batching size\".", nameof(maxFaultSize));
             if (maxSizeWaitingDelay > MAX_SIZE_WAITING_DELAY) throw new ArgumentException($"The \"max size waiting delay\" must be lesser than {MAX_DISPOSE_TIMEOUT.TotalSeconds}s.", nameof(maxSizeWaitingDelay));
             if (disposeTimeout > MAX_DISPOSE_TIMEOUT) throw new ArgumentException($"The \"dispose timeout\" must be lesser than {MAX_DISPOSE_TIMEOUT.TotalSeconds}s.", nameof(disposeTimeout));
@@ -41,8 +40,10 @@ namespace TRBufferList.Core
         
         /// <summary>
         /// Get maximum size allowed by the list.
+        ///
+        /// If null, the main list is unlimited.
         /// </summary>
-        public int MaxSize { get; }
+        public int? MaxSize { get; }
         /// <summary>
         /// Get maximum size of the fault list.
         /// </summary>
@@ -70,7 +71,7 @@ namespace TRBufferList.Core
         {
             return new BufferListOptions(
                 clearBatchingSize,
-                clearBatchingSize * MAX_SIZE_BATCHING_MULTIPLIER,
+                null,
                 clearBatchingSize * MAX_FAULT_SIZE_BATCHING_MULTIPLIER,
                 clearTtl,
                 MAX_SIZE_WAITING_DELAY,

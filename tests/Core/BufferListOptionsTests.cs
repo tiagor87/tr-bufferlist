@@ -14,7 +14,7 @@ namespace TRBufferList.Core.Tests
                 TimeSpan.FromMilliseconds(5000));
 
             options.ClearBatchingSize.Should().Be(100);
-            options.MaxSize.Should().Be(200);
+            options.MaxSize.Should().BeNull();
             options.MaxFaultSize.Should().Be(300);
             options.IdleClearTtl.Should().Be(TimeSpan.FromMilliseconds(5000));
             options.DisposeTimeout.Should().Be(TimeSpan.FromSeconds(10));

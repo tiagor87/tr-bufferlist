@@ -41,21 +41,10 @@ namespace TRBufferList.Core
             _isClearingRunning = false;
         }
 
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
         /// <summary>
         /// Get the quantity of items in list.
         /// </summary>
         public int Count => _mainQueue.Count + _faultQueue.Count;
-
-        /// <summary>
-        /// Get the capacity of the list.
-        /// </summary>
-        public int Capacity => _options.MaxSize + _options.MaxFaultSize;
 
         public bool IsReadOnly => false;
         
@@ -72,7 +61,22 @@ namespace TRBufferList.Core
         /// <summary>
         /// Checks if buffer size is greater than max size.
         /// </summary>
-        public bool IsOverloaded => _mainQueue.Count >= _options.MaxSize;
+        public bool IsOverloaded => _options.MaxSize.HasValue && _mainQueue.Count >= _options.MaxSize;
+        
+        /// <summary>
+        /// Event is called everytime the list is cleared.
+        /// </summary>
+        public event EventHandler<T> Cleared;
+        
+        /// <summary>
+        /// Event is called just before the list is disposed.
+        /// </summary>
+        public event EventHandler<T> Disposed;
+
+        /// <summary>
+        /// Event is called when failure queue is full and some drop happens.
+        /// </summary>
+        public event EventHandler<T> Dropped;
 
         /// <summary>
         /// Get items that failed to publish.
@@ -112,14 +116,6 @@ namespace TRBufferList.Core
             Clear().ConfigureAwait(false);
         }
 
-        private void Wait()
-        {
-            while (!_isDisposing && IsOverloaded)
-            {
-                _autoResetEvent.Wait(_options.MaxSizeWaitingDelay);
-            }
-        }
-
         /// <summary>
         /// Clear the list.
         /// </summary>
@@ -156,27 +152,30 @@ namespace TRBufferList.Core
                 batch?.Clear();
             }
         }
-
-        /// <summary>
-        /// Event is called everytime the list is cleared.
-        /// </summary>
-        public event EventHandler<T> Cleared;
         
         /// <summary>
-        /// Event is called just before the list is disposed.
+        /// Performs application-defined tasks associated with freeing,
+        /// releasing, or resetting unmanaged resources. 
         /// </summary>
-        public event EventHandler<T> Disposed;
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
 
         /// <summary>
-        /// Event is called when failure queue is full and some drop happens.
+        /// Finalize instance.
         /// </summary>
-        public event EventHandler<T> Dropped;
-
         ~BufferList()
         {
             Dispose(false);
         }
 
+        /// <summary>
+        /// Performs application-defined tasks associated with freeing,
+        /// releasing, or resetting unmanaged resources. 
+        /// </summary>
+        /// <param name="disposing">It's <value>true</value> when user called <see cref="Dispose"/>.</param>
         private void Dispose(bool disposing)
         {
             if (_disposed) return;
@@ -192,6 +191,10 @@ namespace TRBufferList.Core
             _disposed = true;
         }
 
+        /// <summary>
+        /// When timer elapsed, try to clear.
+        /// </summary>
+        /// <param name="sender"></param>
         private void OnTimerElapsed(object sender)
         {
             Clear().ConfigureAwait(false);
@@ -234,22 +237,36 @@ namespace TRBufferList.Core
             if (dropped.Any()) Dropped?.Invoke(dropped);
         }
 
+        /// <summary>
+        /// Stop and start timer.
+        /// </summary>
         private void RestartTimer()
         {
             StopTimer();
             StartTimer();
         }
 
+        /// <summary>
+        /// Start timer.
+        /// </summary>
         private void StartTimer()
         {
             _timer.Change(_options.IdleClearTtl, Timeout.InfiniteTimeSpan);
         }
         
+        /// <summary>
+        /// Stop timer.
+        /// </summary>
         private void StopTimer()
         {
             _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
 
+        /// <summary>
+        /// Try to set flag to start clearing, checks if clear is still necessary
+        /// and stop timer.
+        /// </summary>
+        /// <returns></returns>
         private bool TryStartClearing()
         {
             if (_isClearingRunning || _mainQueue.IsEmpty && _faultQueue.IsEmpty) return false;
@@ -264,11 +281,27 @@ namespace TRBufferList.Core
             return true;
         }
 
+        /// <summary>
+        /// Reset clearing flag and restart time.
+        /// </summary>
         private void FinishClearing()
         {
             _isClearingRunning = false;
             _autoResetEvent.Set();
             StartTimer();
+        }
+        
+        /// <summary>
+        /// Wait for list to not be overloaded.
+        ///
+        /// When list is disposed, it will allow all awaiting adds to execute.
+        /// </summary>
+        private void Wait()
+        {
+            while (!_isDisposing && IsOverloaded)
+            {
+                _autoResetEvent.Wait(_options.MaxSizeWaitingDelay);
+            }
         }
         
         /// <summary>

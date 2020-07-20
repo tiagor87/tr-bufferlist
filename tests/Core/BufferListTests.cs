@@ -157,8 +157,6 @@ namespace TRBufferList.Core.Tests
             }
             
             list.Dispose();
-            list.Capacity.Should().Be(BATCHING_SIZE * BufferListOptions.MAX_SIZE_BATCHING_MULTIPLIER
-                                      + BATCHING_SIZE * BufferListOptions.MAX_FAULT_SIZE_BATCHING_MULTIPLIER);
             faultCount.Should().Be(1000);
         }
 
