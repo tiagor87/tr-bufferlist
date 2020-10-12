@@ -1,44 +1,67 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using TRBufferList.Core;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Running;
 
 namespace ConsoleApp
 {
-    class Program
+    public class Program
     {
+        private static BufferList.BufferList<int> _oldBufferList;
+        private static TRBufferList.Core.BufferList<int> _newBufferList;
+
         static void Main(string[] args)
         {
-            ThreadPool.SetMinThreads(250, 500);
+            ThreadPool.SetMinThreads(250, 250);
+            BenchmarkRunner.Run<Program>(DefaultConfig.Instance.WithOption(ConfigOptions.DisableOptimizationsValidator, true));
+        }
 
-            var source = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            var buffer = new BufferList<string>(300, TimeSpan.FromSeconds(5));
-            buffer.Cleared += items =>
+        [GlobalSetup]
+        public void Setup()
+        {
+            static void OnCleared(IEnumerable<int> removedItems)
             {
-                Task.Delay(10).GetAwaiter().GetResult();
-                Console.WriteLine($"Cleared: {items.Count}\nCount: {buffer.Count}");
-            };
-
-            const int size = 200;
-            var tasks = new Task[size];
-
-            for (int i = 0; i < size; i++)
-            {
-                tasks[i] = Task.Factory.StartNew(() =>
-                {
-                    while (!source.Token.IsCancellationRequested)
-                    {
-                        buffer.Add("test");
-                        Task.Delay(10).Wait();
-                    }
-                });
+                Task.Delay(250).ConfigureAwait(false).GetAwaiter().GetResult();
             }
+            _oldBufferList = new BufferList.BufferList<int>(100, TimeSpan.FromSeconds(5));
+            _oldBufferList.Cleared += OnCleared;
+            _newBufferList = new TRBufferList.Core.BufferList<int>(100, TimeSpan.FromSeconds(5));
+            _newBufferList.Cleared += OnCleared;
+        }
 
-            source.Token.Register(buffer.Dispose);
+        [IterationCleanup]
+        public void IterationCleanUp()
+        {
+            _newBufferList.Clear();
+            _oldBufferList.Clear();
+        }
 
-            Task.WaitAll(tasks);
+        [GlobalCleanup]
+        public void GlobalCleanUp()
+        {
+            _newBufferList.Dispose();
+            _oldBufferList.Dispose();
+        }
+        
+        [Benchmark]
+        public void NewBufferList()
+        {
+            for (var i = 0; i < 500; i++)
+            {
+                _newBufferList.Add(i);
+            }
+        }
 
-            Console.ReadKey();
+        [Benchmark]
+        public void OldBufferList()
+        {
+            for (var i = 0; i < 500; i++)
+            {
+                _oldBufferList.Add(i);
+            }
         }
     }
 }

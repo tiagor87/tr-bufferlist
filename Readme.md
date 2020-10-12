@@ -64,3 +64,16 @@ list.Disposed += (items) => {
 
 list.Add(1);
 ```
+
+## Perfrmance
+
+Test on adding items.
+
+* **Capacity (v0.0.6) | Batching size (v0.0.24):** 100
+* **Clearing delay:** 250ms
+* **Items:** 500
+
+|        Method |            Mean |        Error |       StdDev |
+|-------------- |----------------:|-------------:|-------------:|
+| TRBufferList.Core |        11.06 us |     0.066 us |     0.051 us |
+| BufferList v0.0.6 | 1,273,507.75 us | 6,843.318 us | 6,401.244 us |

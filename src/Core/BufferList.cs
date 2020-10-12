@@ -113,7 +113,8 @@ namespace TRBufferList.Core
                 return;
             }
 
-            Clear().ConfigureAwait(false);
+            Task.Factory.StartNew(Clear)
+                .ConfigureAwait(false);
         }
 
         /// <summary>
@@ -130,14 +131,28 @@ namespace TRBufferList.Core
                 // and just once to avoid an infinity looping
                 if (!_faultQueue.IsEmpty)
                 {
-                    batch = DequeueBatch(_faultQueue);
-                    DispatchEvents(batch);
+                    try
+                    {
+                        batch = DequeueBatch(_faultQueue);
+                        DispatchEvents(batch);
+                    }
+                    finally
+                    {
+                        batch?.Clear();
+                    }
                 }
                 
                 do
                 {
-                    batch = DequeueBatch(_mainQueue);
-                    DispatchEvents(batch);
+                    try
+                    {
+                        batch = DequeueBatch(_mainQueue);
+                        DispatchEvents(batch);
+                    }
+                    finally
+                    {
+                        batch?.Clear();
+                    }
                 } while (IsReadyToClear);
 
                 return Task.CompletedTask;
@@ -149,7 +164,6 @@ namespace TRBufferList.Core
             finally
             {
                 FinishClearing();
-                batch?.Clear();
             }
         }
         
@@ -197,7 +211,8 @@ namespace TRBufferList.Core
         /// <param name="sender"></param>
         private void OnTimerElapsed(object sender)
         {
-            Clear().ConfigureAwait(false);
+            Task.Factory.StartNew(Clear)
+                    .ConfigureAwait(false);
         }
 
         /// <summary>
