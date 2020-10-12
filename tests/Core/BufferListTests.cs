@@ -181,7 +181,7 @@ namespace TRBufferList.Core.Tests
         }
 
         [Fact]
-        public async Task GivenBufferShouldTryToCleanListUntilBagIsEmpty()
+        public void GivenBufferShouldTryToCleanListUntilBagIsEmpty()
         {
             var read = 0;
             var maxSize = 0;
@@ -193,20 +193,20 @@ namespace TRBufferList.Core.Tests
                 maxSize = Math.Max(maxSize, removed.Count);
                 count += removed.Count;
                 ++read;
-                if (read >= 100)
+                if (read >= 10)
                 {
                     autoResetEvent.Set();
                 };
             };
 
-            for (var i = 0; i < 1000; i++)
+            for (var i = 0; i < 100; i++)
             {
                 list.Add(i);
             }
 
             autoResetEvent.WaitOne();
             maxSize.Should().Be(10);
-            count.Should().Be(1000);
+            count.Should().BeCloseTo(100, 10);
             list.Dispose();
         }
 
