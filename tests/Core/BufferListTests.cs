@@ -161,41 +161,51 @@ namespace TRBufferList.Core.Tests
         }
 
         [Fact]
-        public void GivenBufferWhenFailedHasAnyShouldDispatchClearForFailedMessages()
+        public async Task GivenBufferWhenFailedHasAnyShouldDispatchClearForFailedMessages()
         {
-            var list = new BufferList<int>(1, TimeSpan.FromSeconds(10));
-            var dispatched = 0;
+            var list = new BufferList<int>(1, Timeout.InfiniteTimeSpan);
+            var autoResetEvent = new AutoResetEvent(false);
+            var i = 0;
             list.Cleared += removed =>
             {
-                ++dispatched;
-                throw new Exception();
+                autoResetEvent.Set();
+                if (++i == 1) throw new Exception();
             };
 
+            
             list.Add(1);
-            list.Add(2);
-            dispatched.Should().Be(3);
-            list.GetFailed().Should().HaveCount(2);
+            autoResetEvent.WaitOne();
+            await Task.Delay(100);
+            list.GetFailed().Should().NotBeEmpty();
+            await list.Clear();
+            list.GetFailed().Should().BeEmpty();
         }
 
         [Fact]
-        public void GivenBufferShouldTryToCleanListUntilBagIsEmpty()
+        public async Task GivenBufferShouldTryToCleanListUntilBagIsEmpty()
         {
             var read = 0;
             var maxSize = 0;
             var count = 0;
             var list = new BufferList<int>(10, Timeout.InfiniteTimeSpan);
+            var autoResetEvent = new AutoResetEvent(false);
             list.Cleared += removed =>
             {
+                maxSize = Math.Max(maxSize, removed.Count);
                 count += removed.Count;
                 ++read;
-                if (read >= 100) return;
-                maxSize = Math.Max(maxSize, removed.Count());
+                if (read >= 100)
+                {
+                    autoResetEvent.Set();
+                };
             };
 
             for (var i = 0; i < 1000; i++)
             {
                 list.Add(i);
             }
+
+            autoResetEvent.WaitOne();
             maxSize.Should().Be(10);
             count.Should().Be(1000);
             list.Dispose();
