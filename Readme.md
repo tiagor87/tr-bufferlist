@@ -65,7 +65,7 @@ list.Disposed += (items) => {
 list.Add(1);
 ```
 
-## Perfrmance
+## Performance
 
 Test on adding items.
 
