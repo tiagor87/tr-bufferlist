@@ -261,7 +261,7 @@ namespace TRBufferList.Core.Tests
         }
 
         [Fact]
-        public void GivenBufferListWhenFaultListFullShouldDrop()
+        public async Task GivenBufferListWhenFaultListFullShouldDrop()
         {
             var list = new BufferList<int>(new BufferListOptions(
                 1,
@@ -272,11 +272,18 @@ namespace TRBufferList.Core.Tests
                 TimeSpan.FromMilliseconds(100)));
 
             var dropped = new List<int>(1);
-            list.Cleared += _ => throw new Exception();
+            var autoResetEvent = new AutoResetEvent(false);
+            var i = 0;
+            list.Cleared += _ =>
+            {
+                if (++i == 2) autoResetEvent.Set();
+                throw new Exception();
+            };
             list.Dropped += items => dropped.AddRange(items);
 
             list.Add(1);
             list.Add(2);
+            await Task.Delay(250);
             dropped.Should().HaveCount(1);
             dropped.First().Should().Be(1);
             list.GetFailed().Should().HaveCount(1);
