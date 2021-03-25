@@ -27,7 +27,7 @@ namespace TRBufferList.Core.Tests
             
             autoResetEvent.WaitOne();
             removedCount.Should().Be(100);
-            list.Should().HaveCount(100);
+            list.Should().HaveCount(1);
         }
         
         [Fact]
