@@ -17,8 +17,9 @@ namespace TRBufferList.Core
         /// <param name="idleClearTtl">Expected time to perform cleaning when no items are added.</param>
         /// <param name="maxSizeWaitingDelay">Waiting time in each scan iteration for processing when the list is overloaded.</param>
         /// <param name="disposeTimeout">Maximum waiting time to perform a complete clean-up during disposal.</param>
+        /// <param name="gcCollectionOptions">Indicates when buffer list should manually call GC.Collect.</param>
         /// <exception cref="ArgumentException">Occurred when any parameter is invalid.</exception>
-        public BufferListOptions(int clearBatchingSize, int? maxSize, int maxFaultSize, TimeSpan idleClearTtl, TimeSpan maxSizeWaitingDelay, TimeSpan disposeTimeout)
+        public BufferListOptions(int clearBatchingSize, int? maxSize, int maxFaultSize, TimeSpan idleClearTtl, TimeSpan maxSizeWaitingDelay, TimeSpan disposeTimeout, BufferListGcCollectionOptions gcCollectionOptions = BufferListGcCollectionOptions.None)
         {
             if (clearBatchingSize <= 0) throw new ArgumentException("The \"clear batching size\" must be greater than zero.", nameof(clearBatchingSize));
             if (maxSize.HasValue && maxSize < clearBatchingSize) throw new ArgumentException("The \"max size\" must be greater than \"clear batching size\".", nameof(maxSize));
@@ -31,6 +32,7 @@ namespace TRBufferList.Core
             DisposeTimeout = disposeTimeout;
             MaxSizeWaitingDelay = maxSizeWaitingDelay;
             MaxFaultSize = maxFaultSize;
+            GcCollectionOptions = gcCollectionOptions;
         }
 
         /// <summary>
@@ -60,14 +62,19 @@ namespace TRBufferList.Core
         /// Get maximum waiting time to perform a complete clean-up during disposal.
         /// </summary>
         public TimeSpan DisposeTimeout { get; }
+        /// <summary>
+        /// Get indication if buffer list should manually executes GC.Collect.
+        /// </summary>
+        public BufferListGcCollectionOptions GcCollectionOptions { get; }
 
         /// <summary>
         /// Create a default options instance with minimum parameters.
         /// </summary>
         /// <param name="clearBatchingSize">Maximum size of the list processed during cleaning.</param>
         /// <param name="clearTtl">Expected time to perform cleaning when no items are added.</param>
+        /// <param name="bufferListGcCollection">Indicate when buffer list should manually call GC.Collect.</param>
         /// <returns></returns>
-        public static BufferListOptions Simple(int clearBatchingSize, TimeSpan clearTtl)
+        public static BufferListOptions Simple(int clearBatchingSize, TimeSpan clearTtl, BufferListGcCollectionOptions bufferListGcCollection = BufferListGcCollectionOptions.None)
         {
             return new BufferListOptions(
                 clearBatchingSize,
@@ -75,7 +82,8 @@ namespace TRBufferList.Core
                 clearBatchingSize * MAX_FAULT_SIZE_BATCHING_MULTIPLIER,
                 clearTtl,
                 MAX_SIZE_WAITING_DELAY,
-                MAX_DISPOSE_TIMEOUT);
+                MAX_DISPOSE_TIMEOUT,
+                bufferListGcCollection);
         }
     }
 }

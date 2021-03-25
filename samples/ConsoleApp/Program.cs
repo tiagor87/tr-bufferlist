@@ -8,6 +8,7 @@ using BenchmarkDotNet.Running;
 
 namespace ConsoleApp
 {
+    [SimpleJob(launchCount: 3, warmupCount: 10, targetCount: 30)]
     public class Program
     {
         private static BufferList.BufferList<int> _oldBufferList;
@@ -49,7 +50,7 @@ namespace ConsoleApp
         [Benchmark]
         public void NewBufferList()
         {
-            for (var i = 0; i < 500; i++)
+            for (var i = 0; i < 1_000_000; i++)
             {
                 _newBufferList.Add(i);
             }

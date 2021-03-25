@@ -176,7 +176,7 @@ namespace TRBufferList.Core.Tests
             autoResetEvent.WaitOne();
             await Task.Delay(300);
             list.GetFailed().Should().NotBeEmpty();
-            await list.Clear();
+            list.Clear();
             list.GetFailed().Should().BeEmpty();
         }
 

@@ -10,7 +10,7 @@ namespace TRBufferList.Core
 {
     public delegate void EventHandler<in T>(IReadOnlyList<T> removedItems);
 
-    public sealed class BufferList<T> : IEnumerable<T>, IDisposable
+    public sealed class BufferList<T> : ICollection<T>, IDisposable
     {
         private readonly BufferListOptions _options;
         private readonly ConcurrentQueue<T> _mainQueue;
@@ -39,6 +39,11 @@ namespace TRBufferList.Core
             _mainQueue = new ConcurrentQueue<T>();
             _faultQueue = new ConcurrentQueue<T>();
             _isClearingRunning = false;
+        }
+
+        public bool Remove(T item)
+        {
+            return false;
         }
 
         /// <summary>
@@ -117,12 +122,22 @@ namespace TRBufferList.Core
                 .ConfigureAwait(false);
         }
 
+        public bool Contains(T item)
+        {
+            return _mainQueue.Contains(item) || _faultQueue.Contains(item);
+        }
+
+        public void CopyTo(T[] array, int arrayIndex)
+        {
+            
+        }
+
         /// <summary>
         /// Clear the list.
         /// </summary>
-        public Task Clear()
+        public void Clear()
         {
-            if (!TryStartClearing()) return Task.CompletedTask;
+            if (!TryStartClearing()) return;
             
             List<T> batch = null;
             try
@@ -152,14 +167,16 @@ namespace TRBufferList.Core
                     finally
                     {
                         batch?.Clear();
+                        if (_options.GcCollectionOptions.HasFlag(BufferListGcCollectionOptions.EachBatchingClearExecution))
+                        {
+                            GC.Collect();
+                        }
                     }
                 } while (IsReadyToClear);
-
-                return Task.CompletedTask;
             }
             catch
             {
-                return Task.CompletedTask;
+                // ignored
             }
             finally
             {
@@ -211,7 +228,7 @@ namespace TRBufferList.Core
         /// <param name="sender"></param>
         private void OnTimerElapsed(object sender)
         {
-            Task.Factory.StartNew(Clear)
+            Task.Factory.StartNew(() => Clear())
                     .ConfigureAwait(false);
         }
 
@@ -301,6 +318,11 @@ namespace TRBufferList.Core
         /// </summary>
         private void FinishClearing()
         {
+            if (_options.GcCollectionOptions.HasFlag(BufferListGcCollectionOptions.EachFullClearExecution))
+            {
+                GC.Collect();
+            }
+
             _isClearingRunning = false;
             _autoResetEvent.Set();
             StartTimer();
@@ -345,7 +367,7 @@ namespace TRBufferList.Core
             {
                 try
                 {
-                    Clear().Wait(source.Token);
+                    Clear();
                 }
                 catch
                 {
