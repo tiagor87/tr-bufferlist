@@ -16,18 +16,18 @@ namespace TRBufferList.Core.Tests
         {
             var removedCount = 0;
 
-            var list = new BufferList<int>(100, TimeSpan.FromSeconds(5));
+            var list = new BufferList<int>(100, Timeout.InfiniteTimeSpan);
             var autoResetEvent = new AutoResetEvent(false);
             list.Cleared += removed =>
             {
-                removedCount = removed.Count();
+                removedCount = removed.Count;
                 autoResetEvent.Set();
             };
             for (var i = 0; i <= 100; i++) list.Add(i);
             
             autoResetEvent.WaitOne();
             removedCount.Should().Be(100);
-            list.Should().HaveCount(1);
+            list.Should().HaveCount(100);
         }
         
         [Fact]
