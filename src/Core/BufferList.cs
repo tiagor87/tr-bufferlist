@@ -35,7 +35,7 @@ namespace TRBufferList.Core
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _autoResetEvent = new ManualResetEventSlim(false);
-            _timer = new Timer(OnTimerElapsed, null, _options.IdleClearTtl, Timeout.InfiniteTimeSpan);
+            _timer = new Timer(OnTimerElapsed, null, _options.IdleClearTtl, _options.IdleClearTtl);
             _mainQueue = new ConcurrentQueue<T>();
             _faultQueue = new ConcurrentQueue<T>();
             _isClearingRunning = false;
@@ -128,8 +128,7 @@ namespace TRBufferList.Core
         }
 
         public void CopyTo(T[] array, int arrayIndex)
-        {
-            
+        {            
         }
 
         /// <summary>
@@ -228,7 +227,8 @@ namespace TRBufferList.Core
         /// <param name="sender"></param>
         private void OnTimerElapsed(object sender)
         {
-            Task.Factory.StartNew(() => Clear())
+            Console.WriteLine("OnTimerElapsed");
+            Task.Factory.StartNew(Clear)
                     .ConfigureAwait(false);
         }
 
@@ -283,7 +283,7 @@ namespace TRBufferList.Core
         /// </summary>
         private void StartTimer()
         {
-            _timer.Change(_options.IdleClearTtl, Timeout.InfiniteTimeSpan);
+            _timer.Change(_options.IdleClearTtl, _options.IdleClearTtl);
         }
         
         /// <summary>
