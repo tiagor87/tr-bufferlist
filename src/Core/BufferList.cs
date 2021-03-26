@@ -227,7 +227,6 @@ namespace TRBufferList.Core
         /// <param name="sender"></param>
         private void OnTimerElapsed(object sender)
         {
-            Console.WriteLine("OnTimerElapsed");
             Task.Factory.StartNew(Clear)
                     .ConfigureAwait(false);
         }
